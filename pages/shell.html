@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}} · Клиенты</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon.svg">
+<script>try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{version}}">
+</head>
+<body data-page="{{page}}">
+<div id="progress" class="progress" hidden><span></span></div>
+<header class="top" data-menu>
+  <a class="brand" href="/" data-link><span class="brand-dot" aria-hidden="true"></span>Клиенты</a>
+  <button class="btn small ghost menu-toggle" type="button" aria-expanded="false" aria-controls="menu">Меню</button>
+  <nav id="menu" class="menu" aria-label="Меню">
+    <a class="btn" href="/" data-link>Список</a>
+    <a class="btn" href="/niches" data-link>Ниша</a>
+    <a class="btn" href="/cities" data-link>Город</a>
+    <a class="btn" href="/amount" data-link>Количество</a>
+    <a class="btn" href="/sources" data-link>Карты</a>
+    <a class="btn" href="/settings" data-link>Настройки</a>
+  </nav>
+</header>
+<div id="flash" class="flash" role="status" aria-live="polite" hidden><p></p><button type="button" class="flash-x" aria-label="Закрыть">×</button></div>
+<main id="main" data-page="{{page}}" data-title="{{title}}">
+{{main}}
+</main>
+<script src="/static/app.js?v={{version}}" defer></script>
+</body>
+</html>

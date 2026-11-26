@@ -1,0 +1,15 @@
+# Описание сервиса для Render (Blueprint). Секреты здесь не хранятся:
+# у них стоит sync: false, Render попросит вписать значения в браузере.
+services:
+  - type: web
+    name: klienty
+    runtime: docker
+    plan: free
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: PASSWORD_HASH
+        sync: false

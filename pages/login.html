@@ -1,0 +1,33 @@
+<div class="login-stage">
+  <div class="login-burst" aria-hidden="true"></div>
+  <section class="login-card" hidden>
+    <div class="brand big"><span class="brand-dot" aria-hidden="true"></span>Клиенты</div>
+    <p class="muted">Агент ищет заведения, которым нужен сайт.</p>
+
+    <form id="login-form" hidden>
+      <label for="pw">Пароль</label>
+      <input id="pw" name="password" type="password" autocomplete="current-password" required>
+      <button class="btn full big" type="submit">Войти</button>
+    </form>
+
+    <form id="setup-form" hidden>
+      <p class="note warn" id="setup-reason">Пароль ещё не задан. Придумай его: сайт посчитает хэш, а ты вставишь его в Render.</p>
+      <label for="pw1">Новый пароль (от 8 символов)</label>
+      <input id="pw1" type="password" autocomplete="new-password" minlength="8" required>
+      <label for="pw2">Ещё раз</label>
+      <input id="pw2" type="password" autocomplete="new-password" minlength="8" required>
+      <button class="btn full big" type="submit">Получить строку для Render</button>
+    </form>
+
+    <div id="setup-result" hidden>
+      <p>Добавь в Render → сервис <b>klienty</b> → <b>Environment</b> → <b>Add Environment Variable</b> две строки ниже: имя и значение. Потом <b>Save Changes</b>. После перезапуска открой эту страницу и войди с новым паролем.</p>
+      <p class="copy-label">Имя (поле NAME)</p>
+      <div class="copy"><code id="hash-name"></code><button class="btn small" type="button" data-copy="hash-name">Копировать</button></div>
+      <p class="copy-label">Значение (поле VALUE)</p>
+      <div class="copy"><code id="hash-value"></code><button class="btn small" type="button" data-copy="hash-value">Копировать</button></div>
+      <p class="muted">Сам пароль нигде не сохраняется. Запомни его.</p>
+    </div>
+
+    <p class="error" id="login-error" role="alert" hidden></p>
+  </section>
+</div>

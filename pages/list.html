@@ -1,0 +1,63 @@
+<section class="search-bar">
+  <div class="chips" id="chips">
+    <a class="chip skel" href="/niches" data-link><small>Ниша</small><b>&nbsp;</b></a>
+    <a class="chip skel" href="/cities" data-link><small>Город</small><b>&nbsp;</b></a>
+    <a class="chip skel" href="/amount" data-link><small>Сколько</small><b>&nbsp;</b></a>
+    <a class="chip skel" href="/sources" data-link><small>Карты</small><b>&nbsp;</b></a>
+  </div>
+  <button class="btn big" id="search-btn" type="button" disabled>Найти клиентов</button>
+</section>
+
+<section class="job" id="job" hidden>
+  <div class="radar" id="radar" aria-hidden="true">
+    <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span>
+    <span class="sweep"></span><span class="core"></span>
+    <div class="dots" id="radar-dots"></div>
+  </div>
+  <div class="job-info">
+    <p class="job-count"><b id="job-count">0</b> <span id="job-count-label">найдено</span></p>
+    <ol class="stages" id="stages">
+      <li data-stage="search">ищу заведения</li>
+      <li data-stage="check">проверяю сайты</li>
+      <li data-stage="score">считаю оценку</li>
+    </ol>
+    <p class="muted" id="job-sub"></p>
+  </div>
+</section>
+
+<section class="note err" id="job-error" hidden>
+  <p id="job-error-text"></p>
+  <button class="btn small" id="retry-btn" type="button">Повторить</button>
+</section>
+
+<section class="list-head">
+  <h1 id="list-title">Список</h1>
+  <div class="filters">
+    <div class="seg" id="cat-filter" role="group" aria-label="Категория">
+      <button type="button" class="on" data-cat="">Все</button>
+      <button type="button" data-cat="site">Создание сайта</button>
+      <button type="button" data-cat="card">Создание визитки</button>
+      <button type="button" data-cat="upgrade">Доработка</button>
+    </div>
+    <label class="switch"><input type="checkbox" id="show-skipped"><span></span>Показывать пропущенные</label>
+  </div>
+</section>
+
+<ul class="rows" id="rows">
+  <li class="row skel"><span></span><span></span><span></span></li>
+  <li class="row skel"><span></span><span></span><span></span></li>
+  <li class="row skel"><span></span><span></span><span></span></li>
+  <li class="row skel"><span></span><span></span><span></span></li>
+  <li class="row skel"><span></span><span></span><span></span></li>
+</ul>
+<p class="muted empty" id="empty" hidden></p>
+
+<p class="attribution">Данные карт: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a></p>
+
+<div class="card-layer" id="card-layer" hidden>
+  <div class="card-scrim" data-close></div>
+  <article class="place-card" id="place-card" role="dialog" aria-modal="true" aria-labelledby="pc-name" tabindex="-1">
+    <button class="card-x" type="button" data-close aria-label="Закрыть">×</button>
+    <div id="pc-body"></div>
+  </article>
+</div>
