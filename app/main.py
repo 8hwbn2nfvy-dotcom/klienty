@@ -82,10 +82,10 @@ async def _db_error(_: Request, e: psycopg.Error):
 
 # ---------- страницы ----------
 
-def render_page(page: str) -> HTMLResponse:
+def render_page(page: str, title: str | None = None) -> HTMLResponse:
     shell = (ROOT / "pages" / "shell.html").read_text(encoding="utf-8")
     body = (ROOT / "pages" / f"{page}.html").read_text(encoding="utf-8")
-    html = (shell.replace("{{title}}", TITLES[page]).replace("{{page}}", page)
+    html = (shell.replace("{{title}}", title or TITLES[page]).replace("{{page}}", page)
             .replace("{{version}}", config.VERSION).replace("{{main}}", body))
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
@@ -107,6 +107,14 @@ def _page_route(path: str, page: str):
 
 for _path, _page in PAGES.items():
     _page_route(_path, _page)
+
+
+@app.get("/search/{job_id}", response_class=HTMLResponse)
+def result_page(job_id: int, request: Request):
+    """Итог одного поиска: та же страница списка, она сама видит адрес и показывает только этот поиск."""
+    if not auth.is_logged_in(request):
+        return RedirectResponse("/login", status_code=303)
+    return render_page("list", title=f"Итог поиска №{job_id}")
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -293,6 +301,22 @@ def latest_job(request: Request):
     auth.require(request)
     ensure_db()
     return {"job": _job_payload(jobs.latest())}
+
+
+@app.get("/api/jobs/{job_id}/places")
+def job_places(job_id: int, request: Request):
+    """Заведения, которые выдал этот поиск: сначала с оценкой по убыванию, потом «проверить вручную»."""
+    auth.require(request)
+    ensure_db()
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Такого поиска нет.")
+    rows = fetch_all("""SELECT * FROM places WHERE id = ANY(%s)
+                        ORDER BY (category = 'manual'), score DESC, name""", (list(job["result_ids"] or []),))
+    many_cities = len(set(r["city"] for r in rows)) > 1
+    return {"job": _job_payload(job),
+            "places": [_place_brief(r) | ({"city_title": _titles([r["city"]], catalog.city)} if many_cities else {})
+                       for r in rows]}
 
 
 @app.get("/api/jobs/{job_id}")

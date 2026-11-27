@@ -378,11 +378,15 @@ PAGES.history = () => {
       const result = j.status === "done" ? `Найдено на карте: ${j.found}, в выдаче: ${j.result_count}`
         : j.status === "error" ? j.error : j.status === "cancelled" ? "Отменён, в список ничего не добавлено" : "Поиск ещё идёт";
       const data = j.map_data_at ? ` · данные карты на ${new Date(j.map_data_at).toLocaleDateString("ru-RU")}` : "";
-      return `<li class="hist" style="animation-delay:${Math.min(i, 20) * 40}ms">
+      const body = `
         <div class="hist-top"><b>№${j.id} · ${esc(when)}</b><span class="hist-status ${kind}">${esc(label)}</span></div>
         <p>${esc(j.niche_title)} · ${esc(j.city_title)}</p>
         <p class="muted">Искал: ${esc(j.categories_title.toLowerCase())} · сколько: ${j.amount}${esc(data)}</p>
-        <p class="hist-result">${esc(result)}</p></li>`;
+        <p class="hist-result">${esc(result)}</p>`;
+      const open = j.status === "done" && j.result_count > 0;
+      return `<li class="hist" style="animation-delay:${Math.min(i, 20) * 40}ms">${open
+        ? `<a class="hist-open" href="/search/${j.id}" data-link>${body}<span class="hist-go">Открыть итог →</span></a>`
+        : body}</li>`;
     }).join("");
   })();
   return () => { alive = false; };
@@ -391,6 +395,9 @@ PAGES.history = () => {
 /* ===== главная: поиск и список ===== */
 PAGES.list = () => {
   let alive = true;
+  // /search/N — итог одного поиска: только его заведения, без панели поиска
+  const resultMatch = location.pathname.match(/^\/search\/(\d+)$/);
+  const resultJob = resultMatch ? Number(resultMatch[1]) : null;
   let pollTimer = 0;
   let places = [];
   let cats = ["site", "card", "upgrade", "manual"]; // что ищем (и показываем); берётся из настроек
@@ -426,11 +433,23 @@ PAGES.list = () => {
         : `<span class="score${p.score >= 60 ? " hi" : ""}" title="Оценка">${p.score}</span>`}</li>`;
   }
 
+  function drawResultHead(job) {
+    const when = new Date(job.created_at).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+    const data = job.map_data_at ? ` · данные карты на ${new Date(job.map_data_at).toLocaleDateString("ru-RU")}` : "";
+    $("#result-title").textContent = `Итог поиска №${job.id}`;
+    $("#result-meta").textContent = `${when} · ${job.niche_title} · ${job.city_title} · искал: ${job.categories_title.toLowerCase()}${data}. Найдено на карте: ${job.found}, в выдаче: ${job.result_count}.`;
+    $("#list-title").textContent = "Что выдал этот поиск";
+  }
+
   function drawRows() {
-    const visible = places.filter((p) => cats.includes(p.category) && (showSkipped || p.status !== "skipped"));
+    // в итоге поиска показываем всё, что он выдал, независимо от «Что ищу»
+    const visible = places.filter((p) => (resultJob || cats.includes(p.category)) && (showSkipped || p.status !== "skipped"));
     $("#rows").innerHTML = visible.map(rowHtml).join("");
     const empty = $("#empty");
-    if (!places.length) { empty.textContent = "Пока пусто. Нажми «Найти клиентов»."; empty.hidden = false; }
+    if (!places.length) {
+      empty.textContent = resultJob ? "Этот поиск ничего не выдал: новых подходящих заведений не нашлось." : "Пока пусто. Нажми «Найти клиентов».";
+      empty.hidden = false;
+    }
     else if (!visible.length) {
       const hiddenSkipped = places.filter((p) => p.status === "skipped" && cats.includes(p.category)).length;
       empty.textContent = hiddenSkipped ? `В выбранных категориях только пропущенные (${hiddenSkipped}). Включи «Показывать пропущенные».` : "В выбранных категориях пока никого нет. Нажми «Найти клиентов».";
@@ -440,6 +459,14 @@ PAGES.list = () => {
 
   async function loadPlaces() {
     try {
+      if (resultJob) {
+        const r = await api(`/api/jobs/${resultJob}/places`);
+        if (!alive) return;
+        places = r.places;
+        drawResultHead(r.job);
+        drawRows();
+        return;
+      }
       const r = await api("/api/places");
       if (!alive) return;
       places = r.places;
@@ -520,8 +547,20 @@ PAGES.list = () => {
     currentJobId = null;
     if (job.status === "done") {
       const dataNote = job.map_data_at ? ` Данные карты на ${new Date(job.map_data_at).toLocaleDateString("ru-RU")}.` : "";
-      flash(job.message + dataNote, job.result_count ? "ok" : "warn", true); // итог поиска не прячется сам
-      await loadPlaces();
+      const notice = [job.message + dataNote, job.result_count ? "ok" : "warn", true]; // итог не прячется сам
+      $("#job-count-label").textContent = "в выдаче — готово";
+      $("#job").classList.add("finished");
+      await sleep(REDUCED ? 0 : 900);          // дать увидеть итоговое число
+      if (!alive) return;
+      const panel = $("#job");
+      if (!REDUCED) {
+        panel.style.height = panel.offsetHeight + "px";
+        void panel.offsetHeight;
+        panel.classList.add("collapsing");      // плавно сворачивается
+        await sleep(320);
+      }
+      if (!alive) return;
+      navigate(`/search/${job.id}`, { notice });
     } else if (job.status === "cancelled") {
       $("#job").hidden = true;
       flash(job.message || "Поиск отменён. В список ничего не добавлено.", "warn", true);
@@ -707,6 +746,17 @@ PAGES.list = () => {
   document.addEventListener("keydown", onKey);
 
   /* --- старт страницы --- */
+  if (resultJob) {
+    $("#result-head").hidden = false;
+    $(".search-bar").hidden = true;
+    $("#job").hidden = true;
+    $("#job-error").hidden = true;
+    (async () => {
+      try { await loadSettings(true); } catch (e) { flash(e.message, "err"); return; }
+      loadPlaces();
+    })();
+    return () => { alive = false; clearTimeout(pollTimer); document.removeEventListener("keydown", onKey); };
+  }
   (async () => {
     try { const d = await loadSettings(true); drawChips(d); cats = [...d.settings.categories]; markCats(); }
     catch (e) { flash(e.message, "err"); return; }

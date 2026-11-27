@@ -242,14 +242,16 @@ async def _work(job_id: int, finishing: _Finishing) -> None:
         finishing.flag = True
         cats = list(job["categories"])
         scored = [c for c in cats if c in scoring.SCORED]
+        # сначала те, кого ещё не показывали; не хватает — добавляются показанные раньше, но не тронутые
         best = await db(fetch_all, """SELECT id, shown_at FROM places WHERE id = ANY(%s) AND category = ANY(%s)
-                                      AND status = 'new' ORDER BY score DESC, name LIMIT %s""",
+                                      AND status = 'new' ORDER BY (shown_at IS NOT NULL), score DESC, name LIMIT %s""",
                         (ids, scored, job["amount"])) if scored else []
         manual = []
         if "manual" in cats:
             # без оценки сравнивать не с чем: отдельная квота того же размера, свежие записи 2ГИС первыми
             manual = await db(fetch_all, """SELECT id, shown_at FROM places WHERE id = ANY(%s) AND category = 'manual'
-                                            AND status = 'new' ORDER BY source_updated_at DESC NULLS LAST, name
+                                            AND status = 'new'
+                                            ORDER BY (shown_at IS NOT NULL), source_updated_at DESC NULLS LAST, name
                                             LIMIT %s""", (ids, job["amount"]))
         best = list(best) + list(manual)
         best_ids = [r["id"] for r in best]

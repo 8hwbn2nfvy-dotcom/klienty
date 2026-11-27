@@ -282,3 +282,29 @@ def test_2gis_check_ok(client):
     login(client)
     r = client.post("/api/sources/2gis/check").json()
     assert r["ok"] is True and "контакты отдаются" in r["message"]
+
+
+def test_result_page_shows_only_that_search(client, monkeypatch):
+    login(client)
+    from app import catalog
+    monkeypatch.setattr(catalog, "AMOUNTS", [2, *catalog.AMOUNTS])  # в поддельной карте всего 5 подходящих
+    assert client.put("/api/settings", json={"amount": 2}).status_code == 200
+    first = wait_job(client, client.post("/api/search").json()["job_id"])
+    r = client.get(f"/api/jobs/{first['id']}/places").json()
+    assert r["job"]["id"] == first["id"] and len(r["places"]) == first["result_count"] == 2
+    scores = [p["score"] for p in r["places"]]
+    assert scores == sorted(scores, reverse=True)
+    page = client.get(f"/search/{first['id']}")
+    assert page.status_code == 200 and f"Итог поиска №{first['id']}" in page.text
+    # повтор выдаёт следующих, кого ещё не показывали; итог первого поиска не меняется
+    second = wait_job(client, client.post("/api/search").json()["job_id"])
+    ids1 = {p["id"] for p in r["places"]}
+    ids2 = {p["id"] for p in client.get(f"/api/jobs/{second['id']}/places").json()["places"]}
+    assert len(ids2) == 2 and not ids1 & ids2 and "Новых в списке: 2" in second["message"]
+    third = wait_job(client, client.post("/api/search").json()["job_id"])  # осталось одно непоказанное + одно старое
+    ids3 = {p["id"] for p in client.get(f"/api/jobs/{third['id']}/places").json()["places"]}
+    assert len(ids3) == 2 and len(ids3 - ids1 - ids2) == 1
+    assert {p["id"] for p in client.get(f"/api/jobs/{first['id']}/places").json()["places"]} == ids1
+    assert client.get("/api/jobs/999999/places").status_code == 404
+    client.cookies.clear()
+    assert client.get(f"/search/{first['id']}", follow_redirects=False).status_code == 303
