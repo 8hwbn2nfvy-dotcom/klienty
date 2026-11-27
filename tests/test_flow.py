@@ -150,7 +150,7 @@ def test_interrupted_jobs_marked_on_restart(client):
 def test_migrations_are_recorded(client):
     from app.db import fetch_all
     names = [r["name"] for r in fetch_all("SELECT name FROM schema_migrations")]
-    assert names == ["001_init.sql", "002_multi_niche_city.sql", "003_cancel_history_freshness.sql"]
+    assert names == ["001_init.sql", "002_multi_niche_city.sql", "003_cancel_history_freshness.sql", "004_refresh_map_cache.sql"]
     from app.migrate import migrate
     assert migrate() == []
 
