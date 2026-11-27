@@ -8,7 +8,9 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.contacts import channel_kinds
 
-CATEGORIES = {"site": "Создание сайта", "card": "Создание визитки", "upgrade": "Доработка"}
+CATEGORIES = {"site": "Создание сайта", "card": "Создание визитки", "upgrade": "Доработка",
+              "manual": "Проверить вручную"}
+SCORED = ("site", "card", "upgrade")  # «Проверить вручную» без оценки: данных для неё нет
 
 # --- пороги ---
 MIN_CHANNELS_FOR_SITE = 2     # сайта нет, но каналов связи столько или больше → «создание сайта»
@@ -41,6 +43,8 @@ def site_signs(check: dict | None) -> list[tuple[str, str, int]]:
     """Признаки старой визитки: [(код, подпись, баллы)]."""
     if not check:
         return []
+    if check.get("protected"):
+        return []  # сайт работает и защищён от роботов — признаков старой визитки не видно
     if not check.get("opened"):
         label, pts = SITE_SIGNS["down"]
         return [("down", f"{label} ({check.get('error') or 'ошибка'})", pts)]
@@ -75,6 +79,9 @@ def is_stale(place: dict) -> bool:
 
 def score(place: dict) -> tuple[str | None, int, list[dict]]:
     """Возвращает (категория или None, оценка 0–100, разбивка [{label, points}])."""
+    if place.get("contacts_known") is False and not place.get("website"):
+        return "manual", 0, [{"label": "карта не отдала контакты — открой карточку в 2ГИС: есть ли сайт, телефон, соцсети",
+                              "points": 0}]
     parts: list[dict] = []
     kinds = channel_kinds(place.get("channels") or [])
     phones = place.get("phones") or []
@@ -84,6 +91,9 @@ def score(place: dict) -> tuple[str | None, int, list[dict]]:
         signs = site_signs(place.get("site_check"))
         if place.get("site_check") is None:
             return None, 0, [{"label": "сайт ещё не проверен", "points": 0}]
+        if (place.get("site_check") or {}).get("protected"):
+            return None, 0, [{"label": "сайт защищён от автоматической проверки — скорее всего крупный современный сайт",
+                              "points": 0}]
         if len(signs) < MIN_OLD_SIGNS_FOR_UPGRADE:
             return None, 0, [{"label": "сайт в порядке: признаков старой визитки нет", "points": 0}]
         category = "upgrade"

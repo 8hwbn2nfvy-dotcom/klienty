@@ -105,6 +105,14 @@ DGIS_ITEMS = [
      "contact_groups": [{"contacts": [
          {"type": "phone", "value": "+79001234567", "text": "+7 900 123-45-67"},
          {"type": "whatsapp", "value": "79001234567", "url": "https://wa.me/79001234567", "text": "WhatsApp"}]}]},
+    # есть в OSM как «Шиномонтаж Колесо» рядом — при ключе без контактов возьмёт контакты из OSM
+    {"id": "70000001000000003", "name": "Шиномонтаж Колесо, шиномонтажная мастерская", "type": "branch",
+     "point": {"lat": 48.7101, "lon": 44.5201}, "dates": {"updated_at": RECENT},
+     "contact_groups": [{"contacts": [{"type": "phone", "value": "+78442112233"}]}]},
+    # нет ни в OSM, ни контактов → «проверить вручную» при ключе без контактов
+    {"id": "70000001000000005", "name": "Резина Плюс, шинный центр", "type": "branch",
+     "point": {"lat": 48.90, "lon": 44.70}, "dates": {"updated_at": RECENT},
+     "contact_groups": [{"contacts": [{"type": "phone", "value": "+78442999999"}]}]},
     # новое заведение: только VK в поле «сайт» и Telegram → «создание сайта»
     {"id": "70000001000000002", "name": "Колесо 34", "type": "branch",
      "address": {"components": [{"type": "street_number", "street": "Ленина", "number": "10"}]},
@@ -129,6 +137,12 @@ def dgis_items(q: str, region_id: int, key: str, page: int = 1, page_size: int =
     CALLS["2gis"] = CALLS.get("2gis", 0) + 1
     if key == "bad":
         return {"meta": {"code": 403, "error": {"type": "keyIsNotActive", "message": "Ключ не активен"}}}
+    if page_size > 10:  # как у демо-ключа
+        return {"meta": {"code": 400, "error": {"type": "paramBadValue",
+                                                "message": "Length of parameter 'page_size' should be from 1 to 10"}}}
+    if page > 5:  # как у демо-ключа
+        return {"meta": {"code": 400, "error": {"type": "paramBadValue",
+                                                "message": "Length of parameter 'page' should be from 1 to 5"}}}
     if page > 1:
         return {"meta": {"code": 404, "error": {"type": "itemNotFound", "message": "Results not found"}}}
     items = [dict(i) for i in DGIS_ITEMS]

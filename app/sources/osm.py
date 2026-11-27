@@ -192,4 +192,6 @@ def _from_row(r: dict) -> FoundPlace:
     return FoundPlace(source=r["source"], ext_type=r["ext_type"], ext_id=r["ext_id"], name=r["name"],
                       street=r["street"], housenumber=r["housenumber"], lat=r["lat"], lon=r["lon"],
                       phones=list(r["phones"]), website=r["website"], channels=list(r["channels"]),
-                      updated_at=r.get("source_updated_at"))
+                      updated_at=r.get("source_updated_at"),
+                      # из кэша: контакты, взятые из OSM, — не свои; своих у записи 2ГИС нет
+                      contacts_known=r.get("contacts_known", True) and r.get("contacts_from", "") == "")

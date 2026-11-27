@@ -22,6 +22,7 @@ class FoundPlace:
     website: str = ""
     channels: list[dict] = field(default_factory=list)  # [{kind, label, value, url}]
     updated_at: datetime | None = None  # когда запись на карте правили или проверяли последний раз
+    contacts_known: bool = True  # False — карта не отдала контакты (2ГИС без платного поля)
 
 
 @dataclass
@@ -30,6 +31,7 @@ class SearchResult:
     center: tuple[float, float] | None
     from_cache: bool
     data_at: datetime | None = None  # на какую дату данные карты у ответившего сервера
+    note: str = ""  # что владельцу стоит знать об этом ответе (например, лимит демо-ключа)
 
 
 class SourceError(RuntimeError):

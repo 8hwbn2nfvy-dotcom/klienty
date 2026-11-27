@@ -3,15 +3,18 @@
 Город → регион 2ГИС через Regions API (кэш в geo_cache бессрочно), заведения — /3.0/items
 по тексту ниши в этом регионе, постранично. Каждый успешный запрос тратит лимит ключа
 (демо-ключ — 1000 запросов на 30 дней), поэтому одинаковый запрос — не чаще раза в сутки
-(кэш в source_fetches) и не больше DGIS_MAX_PAGES страниц.
+(кэш в source_fetches) и не больше DGIS_MAX_RESULTS заведений на пару «ниша + город».
 
-Контакты (items.contact_groups) 2ГИС открывает только за отдельную плату. Без них агент не
-видит сайта и соцсетей, оценка была бы неверной — поэтому поиск без контактов падает с
-понятной ошибкой, а не возвращает неполные данные.
+Контакты (items.contact_groups) 2ГИС открывает только за отдельную плату. Пока их нет,
+работает промежуточный режим: записи приходят с contacts_known = False, контакты для них
+задача поиска берёт из OpenStreetMap (app/merge.py), а кого там нет — идут в категорию
+«Проверить вручную» со ссылкой на карточку 2ГИС. Сайт из названия («700shin.ru, шиномонтаж»)
+берётся сразу.
 """
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 
 import httpx
@@ -35,10 +38,6 @@ _CHANNELS = {
     "viber": ("messenger", "Viber"), "max": ("messenger", "MAX"),
     "email": ("email", "Почта"),
 }
-
-
-class DgisNoContacts(SourceError):
-    pass
 
 
 def _client() -> httpx.AsyncClient:
@@ -115,6 +114,15 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
+_DOMAIN_IN_NAME = re.compile(r"\b((?:\d+\s)?[a-z0-9][a-z0-9-]*\.(?:ru|рф|com|net|org|su|pro|online|site|store|shop|info|biz))\b", re.I)
+
+
+def site_from_name(name: str) -> str:
+    """«700shin.ru, шиномонтажная мастерская» → http://700shin.ru"""
+    m = _DOMAIN_IN_NAME.search(name or "")
+    return "http://" + re.sub(r"\s+", "", m.group(1)).lower() if m else ""  # «700 shin.ru» → 700shin.ru
+
+
 def normalize(item: dict) -> FoundPlace | None:
     name = (item.get("name") or "").strip()
     if not name:
@@ -159,10 +167,14 @@ def normalize(item: dict) -> FoundPlace | None:
                 if not any(x["label"] == label and x["value"] == value for x in channels):
                     channels.append({"kind": ck, "label": label, "value": c.get("text") or value, "url": url})
     dates = item.get("dates") or {}
+    known = "contact_groups" in item
+    if not known and not website:
+        website = site_from_name(name)
     return FoundPlace(source="2gis", ext_type="branch", ext_id=int(raw_id), name=name,
                       street=street, housenumber=housenumber, lat=point.get("lat"), lon=point.get("lon"),
                       phones=phones, website=website, channels=channels,
-                      updated_at=_parse_dt(dates.get("updated_at") or dates.get("created_at")))
+                      updated_at=_parse_dt(dates.get("updated_at") or dates.get("created_at")),
+                      contacts_known=known)
 
 
 class DgisSource(Source):
@@ -184,9 +196,19 @@ class DgisSource(Source):
     def object_url(self, ext_type: str, ext_id: int) -> str:
         return f"https://2gis.ru/firm/{ext_id}"
 
+    page_size = config.DGIS_PAGE_SIZE
+
     async def _page(self, niche: Niche, rid: int, page: int) -> dict:
-        return await _get("/3.0/items", {"q": niche.search_text, "region_id": rid, "type": "branch",
-                                         "fields": FIELDS, "page": page, "page_size": config.DGIS_PAGE_SIZE})
+        params = {"q": niche.search_text, "region_id": rid, "type": "branch", "fields": FIELDS, "page": page}
+        try:
+            return await _get("/3.0/items", {**params, "page_size": self.page_size})
+        except SourceError as e:
+            # демо-ключ отдаёт не больше 10 за запрос: «Length of parameter 'page_size' should be from 1 to 10»
+            if "page_size" not in str(e) or self.page_size <= 10:
+                raise
+            log.info("2gis: page_size %s refused, switching to 10", self.page_size)
+            DgisSource.page_size = 10
+            return await _get("/3.0/items", {**params, "page_size": 10})
 
     async def search(self, niche: Niche, city: City) -> SearchResult:
         fresh = fetch_one("""SELECT place_ids FROM source_fetches WHERE source = '2gis' AND niche = %s AND city = %s
@@ -198,27 +220,32 @@ class DgisSource(Source):
 
         rid = await region_id(city)
         places: list[FoundPlace] = []
-        saw_contacts = False
         total = None
-        for page in range(1, config.DGIS_MAX_PAGES + 1):
-            res = await self._page(niche, rid, page)
+        page = 0
+        note = ""
+        while len(places) < config.DGIS_MAX_RESULTS:
+            page += 1
+            try:
+                res = await self._page(niche, rid, page)
+            except SourceError as e:
+                # демо-ключ: «Length of parameter 'page' should be from 1 to 5» — дальше страниц нет
+                if "'page'" not in str(e) or page == 1:
+                    raise
+                note = (f"2ГИС с этим ключом отдаёт не больше {len(places)} заведений на запрос "
+                        f"(«{niche.title} · {city.title}»: всего в 2ГИС {total}). Платный ключ снимает ограничение.")
+                log.info("2gis: page limit reached at page %s: %s", page, e)
+                break
             items = res.get("items") or []
             total = res.get("total", total)
             for it in items:
-                saw_contacts = saw_contacts or "contact_groups" in it
                 p = normalize(it)
                 if p:
                     places.append(p)
-            if len(items) < config.DGIS_PAGE_SIZE or (total is not None and page * config.DGIS_PAGE_SIZE >= total):
+            if not items or len(items) < self.page_size or (total is not None and page * self.page_size >= total):
                 break
-        if places and not saw_contacts:
-            raise DgisNoContacts(
-                "2ГИС нашёл заведения, но ключ не отдаёт контакты (телефон, сайт, соцсети). "
-                "Без них оценка невозможна. Контакты (поле contact_groups) 2ГИС подключает за отдельную "
-                "плату через отдел продаж — см. README, раздел «2ГИС».")
-        if total and total > config.DGIS_PAGE_SIZE * config.DGIS_MAX_PAGES:
+        if total and total > len(places):
             log.info("2gis: %s in %s has %s results, took first %s", niche.id, city.id, total, len(places))
-        return SearchResult(places, None, from_cache=False, data_at=None)
+        return SearchResult(places, None, from_cache=False, data_at=None, note=note)
 
     async def check(self) -> dict:
         if not self.available:
@@ -238,10 +265,11 @@ class DgisSource(Source):
         with_contacts = sum(1 for it in items if "contact_groups" in it)
         used = used_last_30_days()
         if with_contacts == 0:
-            return {"ok": False, "message": f"Ключ работает и находит заведения (в пробном запросе: {len(items)}), но контакты "
-                                            "(телефон, сайт, соцсети) ключ не отдаёт. Без них 2ГИС для поиска не подходит: "
-                                            f"контакты подключает отдел продаж 2ГИС за отдельную плату. "
-                                            f"Запросов к 2ГИС за 30 дней: {used}."}
+            return {"ok": True, "message": f"Ключ работает и находит заведения (в пробном запросе: {len(items)}), но контакты "
+                                           "(телефон, сайт, соцсети) не отдаёт — их 2ГИС подключает за отдельную плату. "
+                                           "Работает промежуточный режим: контакты берутся из OpenStreetMap, а кого там нет — "
+                                           "в группе «Проверить вручную» со ссылкой на 2ГИС. "
+                                           f"Запросов к 2ГИС за 30 дней: {used} (у демо-ключа лимит 1000)."}
         sample = normalize(items[0])
         what = []
         if sample and sample.phones:

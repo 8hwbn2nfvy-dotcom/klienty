@@ -54,7 +54,7 @@ def test_settings_changed_flag(client):
     login(client)
     s = client.get("/api/settings").json()
     assert s["settings"]["niches"] == ["tyres"] and s["settings"]["cities"] == ["volgograd"] and s["settings"]["amount"] == 10
-    assert s["settings"]["categories"] == ["site", "card", "upgrade"]
+    assert s["settings"]["categories"] == ["site", "card", "upgrade", "manual"]
     assert client.put("/api/settings", json={"cities": []}).status_code == 400
     assert client.put("/api/settings", json={"cities": ["volgograd", "mars"]}).status_code == 400
     r = client.put("/api/settings", json={"cities": ["rostov", "volgograd", "rostov"]}).json()
@@ -150,7 +150,7 @@ def test_interrupted_jobs_marked_on_restart(client):
 def test_migrations_are_recorded(client):
     from app.db import fetch_all
     names = [r["name"] for r in fetch_all("SELECT name FROM schema_migrations")]
-    assert names == ["001_init.sql", "002_multi_niche_city.sql", "003_cancel_history_freshness.sql", "004_refresh_map_cache.sql", "005_2gis.sql"]
+    assert names == ["001_init.sql", "002_multi_niche_city.sql", "003_cancel_history_freshness.sql", "004_refresh_map_cache.sql", "005_2gis.sql", "006_contacts_known.sql"]
     from app.migrate import migrate
     assert migrate() == []
 
@@ -231,25 +231,51 @@ def test_2gis_with_osm_merges_duplicates(client):
 def test_2gis_key_problems(client, monkeypatch):
     login(client)
     from app import config
-    monkeypatch.setattr(config, "DGIS_API_KEY", "nocontacts")
+    monkeypatch.setattr(config, "DGIS_API_KEY", "bad")
     r = client.post("/api/sources/2gis/check").json()
-    assert r["ok"] is False and "контакты" in r["message"]
+    assert r["ok"] is False and "не принял ключ" in r["message"] and "Ключ не активен" in r["message"]
     client.put("/api/settings", json={"sources": {"osm": False, "2gis": True}})
     job = wait_job(client, client.post("/api/search").json()["job_id"])
-    assert job["status"] == "error" and "не отдаёт контакты" in job["error"]
-    monkeypatch.setattr(config, "DGIS_API_KEY", "bad")
-    r = client.post("/api/sources/2gis/check").json()  # регион уже в кэше — ошибку даёт поиск заведений
-    assert r["ok"] is False and "не принял ключ" in r["message"]
-    from app.db import execute
-    execute("DELETE FROM source_fetches")  # иначе поиск возьмёт кэш и к 2ГИС не пойдёт
-    job = wait_job(client, client.post(f"/api/jobs/{job['id']}/retry").json()["job_id"])
-    assert job["status"] == "error" and "не принял ключ" in job["error"] and "Ключ не активен" in job["error"]
+    assert job["status"] == "error" and "не принял ключ" in job["error"]
     monkeypatch.setattr(config, "DGIS_API_KEY", "")
     r = client.post("/api/sources/2gis/check").json()
     assert r["ok"] is False and "DGIS_API_KEY" in r["message"]
     s = client.get("/api/settings").json()
     assert s["settings"]["sources"]["2gis"] is False  # без ключа включить нельзя
     assert client.put("/api/settings", json={"sources": {"osm": True, "2gis": True}}).status_code == 400
+
+
+def test_2gis_without_contacts_intermediate_mode(client, monkeypatch):
+    """Ключ без контактов: список из 2ГИС, контакты из OSM, остальные — «Проверить вручную»."""
+    login(client)
+    from app import config
+    monkeypatch.setattr(config, "DGIS_API_KEY", "nocontacts")
+    r = client.post("/api/sources/2gis/check").json()
+    assert r["ok"] is True and "промежуточный режим" in r["message"]
+    # включён только 2ГИС — OSM всё равно спрашивается ради контактов
+    client.put("/api/settings", json={"sources": {"osm": False, "2gis": True},
+                                      "categories": ["site", "card", "upgrade", "manual"]})
+    job = wait_job(client, client.post("/api/search").json()["job_id"])
+    assert job["status"] == "done", job
+    assert "Проверить вручную" in job["message"]
+    places = {p["name"]: p for p in client.get("/api/places").json()["places"]}
+    # OSM-записи без пары в 2ГИС не показываются: OSM здесь только помощник
+    assert "Автошина" not in places and "Резина 24" not in places
+    kol = places["Шиномонтаж Колесо, шиномонтажная мастерская"]
+    assert kol["category"] == "site" and {l["label"] for l in kol["links"]} >= {"VK", "Telegram"}
+    card = client.get(f"/api/places/{kol['id']}").json()
+    assert card["contacts_from"] == "osm" and card["contacts_known"] is True
+    ashot = places["Шины у Ашота, шиномонтаж"]  # пара в OSM есть по названию рядом
+    assert ashot["category"] == "card" and ashot["phone"]
+    plus = places["Резина Плюс, шинный центр"]
+    assert plus["category"] == "manual" and plus["score"] == 0 and plus["links"] == [] and plus["phone"] == ""
+    assert places["Колесо 34"]["category"] == "manual"  # без контактов и без пары в OSM
+    # повтор в те же сутки берёт 2ГИС из кэша — «проверить вручную» должно остаться
+    job2 = wait_job(client, client.post("/api/search").json()["job_id"])
+    assert job2["status"] == "done" and "сохранённого поиска" in job2["message"]
+    places2 = {p["name"]: p for p in client.get("/api/places").json()["places"]}
+    assert places2["Резина Плюс, шинный центр"]["category"] == "manual"
+    assert places2["Шиномонтаж Колесо, шиномонтажная мастерская"]["category"] == "site"
 
 
 def test_2gis_check_ok(client):

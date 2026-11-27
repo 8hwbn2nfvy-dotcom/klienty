@@ -42,3 +42,21 @@ def test_site_down_is_not_no_site():
 def test_score_clamped():
     p = {"website": "", "phones": [], "channels": []}
     assert 0 <= scoring.score(p)[1] <= 100
+
+
+def test_2gis_site_from_name_and_merge_names():
+    from app.merge import find_pairs
+    from app.sources.dgis import site_from_name
+    assert site_from_name("700shin.ru, шиномонтажная мастерская") == "http://700shin.ru"
+    assert site_from_name("Шина34, шинный центр") == ""
+    assert site_from_name("700 shin.ru, сервисный центр") == "http://700shin.ru"
+    osm = [{"id": 1, "source": "osm", "city": "v", "name": "Шина34", "lat": 48.7, "lon": 44.5, "phones": []}]
+    dgis = [{"id": 2, "source": "2gis", "city": "v", "name": "Шина34, шинный центр", "lat": 48.7005, "lon": 44.5, "phones": []},
+            {"id": 3, "source": "2gis", "city": "v", "name": "Шина34, шинный центр", "lat": 48.8, "lon": 44.5, "phones": []}]
+    assert find_pairs(osm, dgis) == {1: 2}  # тот же, что рядом; далёкий филиал не склеивается
+
+
+def test_bot_protected_site_is_not_a_lead():
+    cat, _, parts = scoring.score({"website": "https://big.ru", "phones": ["1"], "channels": [],
+                                   "site_check": {"opened": False, "protected": True, "status_code": 401}})
+    assert cat is None and "защищён" in parts[0]["label"]

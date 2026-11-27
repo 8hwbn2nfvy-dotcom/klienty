@@ -393,7 +393,7 @@ PAGES.list = () => {
   let alive = true;
   let pollTimer = 0;
   let places = [];
-  let cats = ["site", "card", "upgrade"]; // что ищем (и показываем); берётся из настроек
+  let cats = ["site", "card", "upgrade", "manual"]; // что ищем (и показываем); берётся из настроек
   let showSkipped = false;
   let shownDots = 0;
   let currentJobId = null;
@@ -414,13 +414,16 @@ PAGES.list = () => {
     const stale = p.stale ? `<span class="badge stale" title="Запись на карте давно не обновлялась">${p.source_updated_at ? "карта " + p.source_updated_at.slice(0, 4) : "старая запись"}</span>` : "";
     const addr = [p.city_title, [p.street, p.housenumber].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
     const contacts = [];
-    if (p.phone) contacts.push(`<a href="tel:${esc(p.phone.replace(/[^\d+]/g, ""))}">${esc(p.phone)}</a>`);
+    if (p.category === "manual") contacts.push('<span class="muted">контакты — в карточке 2ГИС</span>');
+    else if (p.phone) contacts.push(`<a href="tel:${esc(p.phone.replace(/[^\d+]/g, ""))}">${esc(p.phone)}</a>`);
     for (const l of p.links) contacts.push(`<a href="${esc(l.url)}" target="_blank" rel="noopener nofollow">${esc(l.label)}</a>`);
     return `<li class="row${p.status === "skipped" ? " is-skipped" : ""}" tabindex="0" data-id="${p.id}" style="animation-delay:${Math.min(i, 25) * 40}ms">
       <div class="row-name"><b>${esc(p.name)}${badge}${stale}</b>${addr ? `<small>${esc(addr)}</small>` : ""}
         <span class="row-contacts">${contacts.length ? contacts.join("") : '<span class="muted">контактов на карте нет</span>'}</span></div>
       <span class="cat">${esc(cats[p.category] || "")}</span>
-      <span class="score${p.score >= 60 ? " hi" : ""}" title="Оценка">${p.score}</span></li>`;
+      ${p.category === "manual"
+        ? '<span class="score manual" title="Без оценки: контакты не известны">?</span>'
+        : `<span class="score${p.score >= 60 ? " hi" : ""}" title="Оценка">${p.score}</span>`}</li>`;
   }
 
   function drawRows() {
@@ -566,7 +569,7 @@ PAGES.list = () => {
     poll(currentJobId);
   });
 
-  const ALL_CATS = ["site", "card", "upgrade"];
+  const ALL_CATS = ["site", "card", "upgrade", "manual"];
   function markCats() {
     for (const b of $$("#cat-filter button")) {
       const on = b.dataset.cat === "*" ? cats.length === ALL_CATS.length : cats.includes(b.dataset.cat);
@@ -620,14 +623,19 @@ PAGES.list = () => {
         ? `Открылся (код ${s.status_code}${s.final_url && s.final_url !== s.url ? `, переадресация на ${esc(s.final_url)}` : ""}). https: ${s.https ? "да" : "нет"}, мобильная версия: ${s.viewport ? "да" : "нет"}, год в подвале: ${s.footer_year || "не найден"}, текста на главной: ${s.text_len} симв., ссылок на другие страницы: ${s.internal_links}, битых из проверенных: ${s.broken_links} из ${s.tested_links}.`
         : `Сайт не открывается: ${esc(s.error)}${s.status_code ? ` (код ${s.status_code})` : ""}.`;
     }
+    const manual = p.category === "manual";
+    const fromOsm = p.contacts_from === "osm" ? '<p class="muted small">Контакты взяты из OpenStreetMap: 2ГИС их не отдаёт.</p>' : "";
     return `
       <h2 id="pc-name">${esc(p.name)}</h2>
+      ${manual ? `<p><a class="btn full" href="${esc(p.object_url)}" target="_blank" rel="noopener">Открыть в 2ГИС: телефон и сайт</a></p>` : ""}
       <p class="muted">${esc(p.city_title)}, ${esc(addr)}</p>
-      <p><b>${esc(cats[p.category] || "")}</b> · оценка <b>${p.score}</b> из 100 · статус: <b id="pc-status">${esc(st[p.status])}</b></p>
+      <p><b>${esc(cats[p.category] || "")}</b> · ${manual ? "без оценки" : `оценка <b>${p.score}</b> из 100`} · статус: <b id="pc-status">${esc(st[p.status])}</b></p>
       <section class="pc-sec"><h3>Что предложить</h3><p>${esc(p.offer)}</p></section>
-      <section class="pc-sec"><h3>Из чего сложилась оценка</h3><ul class="parts">${parts}<li class="total"><span>Итого (от 0 до 100)</span><b>${p.score}</b></li></ul></section>
+      ${manual ? `<section class="pc-sec"><h3>Почему без оценки</h3><p>Оценку считают по сайту и контактам, а их карта не отдала. Посмотри в 2ГИС и реши сам.</p></section>`
+        : `<section class="pc-sec"><h3>Из чего сложилась оценка</h3><ul class="parts">${parts}<li class="total"><span>Итого (от 0 до 100)</span><b>${p.score}</b></li></ul></section>`}
       ${site ? `<section class="pc-sec"><h3>Проверка сайта</h3><p>${site}</p></section>` : ""}
-      <section class="pc-sec"><h3>Контакты</h3>${contacts.length ? `<ul class="contacts">${contacts.join("")}</ul>` : "<p class='muted'>На карте контактов нет.</p>"}</section>
+      <section class="pc-sec"><h3>Контакты</h3>${manual ? "<p class='muted'>2ГИС не отдал контакты, в OpenStreetMap этого заведения нет — смотри карточку в 2ГИС.</p>"
+        : contacts.length ? `<ul class="contacts">${contacts.join("")}</ul>${fromOsm}` : "<p class='muted'>На карте контактов нет.</p>"}</section>
       <section class="pc-sec"><h3>На карте</h3><p>${p.source_updated_at
         ? `Запись обновлена или проверена: <b>${new Date(p.source_updated_at).toLocaleDateString("ru-RU")}</b>${p.stale ? " — давно, проверь по телефону, работает ли." : "."}`
         : "Дата обновления записи неизвестна — проверь по телефону, работает ли."}<br>

@@ -92,21 +92,22 @@ def _upsert_places(found: list[FoundPlace], niche_id: str, city_id: str) -> list
         for p in found:
             row = c.execute("""
                 INSERT INTO places(source, ext_type, ext_id, niches, city, name, street, housenumber, lat, lon,
-                                   phones, website, channels, source_updated_at)
-                VALUES (%s, %s, %s, ARRAY[%s], %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                   phones, website, channels, source_updated_at, contacts_known)
+                VALUES (%s, %s, %s, ARRAY[%s], %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (source, ext_type, ext_id) DO UPDATE SET
                     niches = (SELECT array_agg(DISTINCT x) FROM unnest(places.niches || EXCLUDED.niches) x),
                     city = EXCLUDED.city, name = EXCLUDED.name, street = EXCLUDED.street,
                     housenumber = EXCLUDED.housenumber, lat = EXCLUDED.lat, lon = EXCLUDED.lon,
                     phones = EXCLUDED.phones, channels = EXCLUDED.channels,
                     source_updated_at = COALESCE(EXCLUDED.source_updated_at, places.source_updated_at),
+                    contacts_known = EXCLUDED.contacts_known, contacts_from = '',
                     -- сайт сменился → старая проверка больше не про него
                     site_check = CASE WHEN places.website = EXCLUDED.website THEN places.site_check END,
                     site_checked_at = CASE WHEN places.website = EXCLUDED.website THEN places.site_checked_at END,
                     website = EXCLUDED.website, updated_at = now()
                 RETURNING id""",
                 (p.source, p.ext_type, p.ext_id, niche_id, city_id, p.name, p.street, p.housenumber, p.lat, p.lon,
-                 p.phones, p.website, Jsonb(p.channels), p.updated_at)).fetchone()
+                 p.phones, p.website, Jsonb(p.channels), p.updated_at, p.contacts_known)).fetchone()
             ids.append(row["id"])
     return ids
 
@@ -163,7 +164,13 @@ async def _work(job_id: int, finishing: _Finishing) -> None:
         cached: list[str] = []
         center: tuple[float, float] | None = None
         data_dates: list = []
-        for source_id in job["sources"]:
+        notes: list[str] = []
+        helper_ids: list[int] = []  # записи OSM, нужные только как источник контактов для 2ГИС
+        plan = list(job["sources"])
+        if "2gis" in plan and "osm" not in plan:
+            plan.append("osm")
+        for source_id in plan:
+            helper = source_id not in job["sources"]
             src = get_source(source_id)
             if not src or not src.available:
                 raise SourceError(f"Источник «{source_id}» недоступен.")
@@ -173,10 +180,15 @@ async def _work(job_id: int, finishing: _Finishing) -> None:
                     got = await db(_upsert_places, res.places, niche.id, city.id)
                     if res.data_at:
                         data_dates.append(res.data_at)
+                    if res.note and not helper:
+                        notes.append(res.note)
                     if res.from_cache:
                         cached.append(f"{niche.title} · {city.title}")
                     else:
                         await db(_save_fetch, source_id, niche.id, city.id, got)
+                    if helper:
+                        helper_ids += got
+                        continue
                     for place_id, p in zip(got, res.places):  # got идёт в том же порядке, что res.places
                         if place_id in ids:
                             continue  # то же заведение под другой нишей — вторую точку не ставим
@@ -197,8 +209,8 @@ async def _work(job_id: int, finishing: _Finishing) -> None:
             return
 
         # Одно заведение из двух карт — одна запись (контакты берутся из 2ГИС)
-        if len(job["sources"]) > 1:
-            merged = await db(_merge_duplicates, ids)
+        if "2gis" in job["sources"] and (len(job["sources"]) > 1 or helper_ids):
+            merged = await db(_merge_duplicates, ids + helper_ids)
             ids = [i for i in ids if i not in merged]
 
         # 2. Проверяю сайты
@@ -229,9 +241,17 @@ async def _work(job_id: int, finishing: _Finishing) -> None:
         # 4. N лучших среди новых — только в тех категориях, что выбраны для поиска
         finishing.flag = True
         cats = list(job["categories"])
+        scored = [c for c in cats if c in scoring.SCORED]
         best = await db(fetch_all, """SELECT id, shown_at FROM places WHERE id = ANY(%s) AND category = ANY(%s)
                                       AND status = 'new' ORDER BY score DESC, name LIMIT %s""",
-                        (ids, cats, job["amount"]))
+                        (ids, scored, job["amount"])) if scored else []
+        manual = []
+        if "manual" in cats:
+            # без оценки сравнивать не с чем: отдельная квота того же размера, свежие записи 2ГИС первыми
+            manual = await db(fetch_all, """SELECT id, shown_at FROM places WHERE id = ANY(%s) AND category = 'manual'
+                                            AND status = 'new' ORDER BY source_updated_at DESC NULLS LAST, name
+                                            LIMIT %s""", (ids, job["amount"]))
+        best = list(best) + list(manual)
         best_ids = [r["id"] for r in best]
         fresh = sum(1 for r in best if r["shown_at"] is None)
         if best_ids:
@@ -239,13 +259,17 @@ async def _work(job_id: int, finishing: _Finishing) -> None:
         suitable = (await db(fetch_one, "SELECT count(*) AS n FROM places WHERE id = ANY(%s) AND category = ANY(%s)",
                              (ids, cats)))["n"]
         msg = (f"Найдено на карте: {len(ids)}. Подходят под выбранные категории ({_cat_titles(cats)}): {suitable}. "
-               f"Лучших в выдаче: {len(best_ids)}.")
+               f"Лучших в выдаче: {len(best_ids) - len(manual)}.")
+        if manual:
+            msg += f" Проверить вручную (контакты 2ГИС закрыты, в OSM их нет): {len(manual)}."
         if not best_ids:
             msg += " Новых подходящих нет: все уже в работе или пропущены. Ничего не изменилось."
         elif fresh == 0:
             msg += " Все они уже были в списке раньше — новых не появилось."
         else:
             msg += f" Новых в списке: {fresh}."
+        if notes:
+            msg += " " + " ".join(notes)
         if cached:
             msg += f" Из сохранённого поиска за последние сутки (карту заново не спрашивали): {', '.join(cached)}."
         await db(_update, job_id, status="done", stage="done", result_ids=best_ids, message=msg, finished_at=_now())
@@ -268,15 +292,27 @@ def _now():
 
 def _merge_duplicates(ids: list[int]) -> set[int]:
     """Склеивает записи OSM с записями 2ГИС того же заведения. Возвращает id склеенных записей OSM."""
-    rows = fetch_all("SELECT id, source, city, name, lat, lon, phones FROM places WHERE id = ANY(%s)", (ids,))
+    rows = fetch_all("""SELECT id, source, city, name, lat, lon, phones, website, channels, contacts_known
+                        FROM places WHERE id = ANY(%s)""", (ids,))
     osm = [r for r in rows if r["source"] == "osm"]
-    dgis = [r for r in rows if r["source"] == "2gis"]
-    pairs = merge.find_pairs(osm, dgis)
+    dgis = {r["id"]: r for r in rows if r["source"] == "2gis"}
+    pairs = merge.find_pairs(osm, list(dgis.values()))
+    by_id = {r["id"]: r for r in osm}
     with connect() as c:
         # пересчёт с нуля: если в 2ГИС заведение пропало, запись OSM снова видна
         c.execute("UPDATE places SET merged_into = NULL WHERE id = ANY(%s)", ([r["id"] for r in osm],))
         for osm_id, dgis_id in pairs.items():
             c.execute("UPDATE places SET merged_into = %s WHERE id = %s", (dgis_id, osm_id))
+            d, o = dgis[dgis_id], by_id[osm_id]
+            if not d["contacts_known"]:
+                # 2ГИС не отдал контакты — берём их из OSM; сайт из названия 2ГИС важнее пустого
+                website = o["website"] or d["website"]
+                c.execute("""UPDATE places SET phones = %s, website = %s, channels = %s, contacts_known = true,
+                                 contacts_from = 'osm',
+                                 site_check = CASE WHEN website = %s THEN site_check END,
+                                 site_checked_at = CASE WHEN website = %s THEN site_checked_at END
+                             WHERE id = %s""",
+                          (o["phones"], website, Jsonb(o["channels"]), website, website, dgis_id))
     return set(pairs)
 
 

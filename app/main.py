@@ -346,6 +346,7 @@ def place_card(place_id: int, request: Request):
     return {**_place_brief(r), "city_title": c.title if c else r["city"], "phones": r["phones"],
             "website": r["website"], "channels": r["channels"], "site_check": r["site_check"],
             "score_parts": r["score_parts"], "offer": offer,
+            "contacts_known": r["contacts_known"], "contacts_from": r["contacts_from"],
             "object_url": src.object_url(r["ext_type"], r["ext_id"]) if src else "",
             "source_title": src.title if src else r["source"], "attribution": src.attribution if src else ""}
 

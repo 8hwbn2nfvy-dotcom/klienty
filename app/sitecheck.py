@@ -18,6 +18,7 @@ from app.ratelimit import limiter
 TIMEOUT = 10.0
 MAX_BYTES = 2_000_000
 MAX_LINKS_TO_TEST = 3
+PROTECTED_CODES = (401, 403, 429)  # ответ защиты от ботов, а не поломка
 _SKIP_EXT = re.compile(r"\.(jpe?g|png|gif|webp|svg|pdf|docx?|xlsx?|zip|rar|mp4|mp3)$", re.I)
 
 
@@ -139,6 +140,11 @@ async def check(url: str) -> dict:
         result["status_code"] = r.status_code
         result["final_url"] = str(r.url)
         result["https"] = r.url.scheme == "https"
+        if r.status_code in PROTECTED_CODES:
+            # сайт жив, но не пускает роботов (защита от ботов) — так делают крупные современные сайты
+            result["protected"] = True
+            result["error"] = f"сайт не пускает автоматическую проверку (код {r.status_code})"
+            return result
         if r.status_code >= 400:
             result["error"] = f"сервер ответил кодом {r.status_code}"
             return result

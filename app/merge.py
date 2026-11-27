@@ -13,7 +13,7 @@ import re
 PHONE_MATCH_METERS = 3000
 NAME_MATCH_METERS = 300
 _GENERIC = re.compile(r"\b(шиномонтаж\w*|автосервис\w*|автомойк\w*|парикмахерск\w*|салон\w*|красоты|"
-                      r"стоматолог\w*|клиник\w*|центр|сервис|ооо|ип|шин\w*)\b", re.I)
+                      r"стоматолог\w*|клиник\w*|центр|сервис|ооо|ип|шинн\w*|шины)\b", re.I)
 
 
 def _phones(p: dict) -> set[str]:
@@ -21,8 +21,13 @@ def _phones(p: dict) -> set[str]:
 
 
 def _name(p: dict) -> str:
-    s = _GENERIC.sub(" ", (p.get("name") or "").lower().replace("ё", "е"))
-    return re.sub(r"[^\w]+", "", s)
+    """Название для сравнения: у 2ГИС после запятой идёт вид деятельности («Шина34, шинный центр»),
+    общие слова («шиномонтаж», «ООО») убираются, если после этого что-то остаётся."""
+    raw = (p.get("name") or "").lower().replace("ё", "е")
+    if p.get("source") == "2gis":
+        raw = raw.split(",")[0]
+    short = re.sub(r"[^\w]+", "", _GENERIC.sub(" ", raw))
+    return short or re.sub(r"[^\w]+", "", raw)
 
 
 def _meters(a: dict, b: dict) -> float:
