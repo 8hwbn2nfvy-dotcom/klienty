@@ -150,7 +150,7 @@ def test_interrupted_jobs_marked_on_restart(client):
 def test_migrations_are_recorded(client):
     from app.db import fetch_all
     names = [r["name"] for r in fetch_all("SELECT name FROM schema_migrations")]
-    assert names == ["001_init.sql", "002_multi_niche_city.sql", "003_cancel_history_freshness.sql", "004_refresh_map_cache.sql", "005_2gis.sql", "006_contacts_known.sql"]
+    assert names == ["001_init.sql", "002_multi_niche_city.sql", "003_cancel_history_freshness.sql", "004_refresh_map_cache.sql", "005_2gis.sql", "006_contacts_known.sql", "007_website_manual.sql"]
     from app.migrate import migrate
     assert migrate() == []
 
@@ -257,7 +257,7 @@ def test_2gis_without_contacts_intermediate_mode(client, monkeypatch):
                                       "categories": ["site", "card", "upgrade", "manual"]})
     job = wait_job(client, client.post("/api/search").json()["job_id"])
     assert job["status"] == "done", job
-    assert "Проверить вручную" in job["message"]
+    assert "проверить вручную — " in job["message"]
     places = {p["name"]: p for p in client.get("/api/places").json()["places"]}
     # OSM-записи без пары в 2ГИС не показываются: OSM здесь только помощник
     assert "Автошина" not in places and "Резина 24" not in places
@@ -349,3 +349,33 @@ def test_project_stages(client):
     job = wait_job(client, client.post("/api/search").json()["job_id"])
     ids = {p["id"] for p in client.get(f"/api/jobs/{job['id']}/places").json()["places"]}
     assert pid not in ids
+
+
+def test_manual_website_and_breakdown(client, fake_server):
+    login(client)
+    client.put("/api/settings", json={"categories": ["site", "card"], "amount": 5})
+    job = wait_job(client, client.post("/api/search").json()["job_id"])
+    # подробный итог: почему остальные не попали
+    assert "Не попали в выдачу" in job["message"] and "«Доработка» — не выбрано в «Что ищу»" in job["message"]
+    assert "включи в «Что ищу»: «Доработка»" in job["message"]
+    places = {p["name"]: p for p in client.get("/api/places").json()["places"]}
+    ashot = places["Шины у Ашота"]
+    assert ashot["category"] == "card" and ashot["no_site_on_map"] is True and "yandex.ru/search" in ashot["find_site_url"]
+    assert client.post(f"/api/places/{ashot['id']}/website", json={"url": "не сайт"}).status_code == 400
+    # «нашёл сайт»: старый сайт → доработка
+    from tests.fake_world import BASE
+    r = client.post(f"/api/places/{ashot['id']}/website", json={"url": BASE + "/old"}).json()
+    assert r["previous_category"] == "card" and r["place"]["category"] == "upgrade" and r["place"]["website_manual"]
+    # новый поиск адрес не затирает
+    client.put("/api/settings", json={"categories": ["site", "card", "upgrade"]})
+    from app.db import execute
+    execute("DELETE FROM source_fetches")
+    wait_job(client, client.post("/api/search").json()["job_id"])
+    card = client.get(f"/api/places/{ashot['id']}").json()
+    assert card["website"] == BASE + "/old" and card["category"] == "upgrade"
+    # хороший сайт → предлагать нечего
+    r = client.post(f"/api/places/{ashot['id']}/website", json={"url": BASE + "/good"}).json()
+    assert r["place"]["category"] == "upgrade"  # тестовый «хороший» сайт по http — признак «нет https»
+    # «сайта нет» — адрес убран, снова визитка
+    r = client.post(f"/api/places/{ashot['id']}/website", json={"url": ""}).json()
+    assert r["place"]["category"] == "card" and r["place"]["website_manual"] == ""

@@ -404,6 +404,18 @@ span.tile.skel { display: block; cursor: default; animation: shimmer 1.3s linear
 .stage-btn.on { background: var(--btn-bg); color: var(--btn-text); box-shadow: inset 0 -4px 0 var(--btn-edge); }
 .stage-btn:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
 
+/* ---------- есть ли сайт ---------- */
+.site-box { padding: 12px; border-radius: 12px; background: var(--warn-soft); }
+.site-box h3 { color: var(--warn); }
+.site-form label { margin-top: 6px; }
+.site-row { display: flex; gap: 8px; }
+.site-row input { flex: 1; min-width: 0; }
+.site-row .btn { flex: none; min-height: var(--tap); }
+.clear-site { margin-top: 8px; }
+.site-result { margin: 8px 0 0; }
+.row-contacts a.find-site { color: var(--warn); font-weight: 600; }
+@media (max-width: 420px) { .site-row { flex-direction: column; } }
+
 /* ---------- история ---------- */
 .history { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 10px; }
 .hist { padding: 14px 16px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--card); animation: rise .28s ease both; }

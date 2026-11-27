@@ -101,10 +101,13 @@ def _upsert_places(found: list[FoundPlace], niche_id: str, city_id: str) -> list
                     phones = EXCLUDED.phones, channels = EXCLUDED.channels,
                     source_updated_at = COALESCE(EXCLUDED.source_updated_at, places.source_updated_at),
                     contacts_known = EXCLUDED.contacts_known, contacts_from = '',
-                    -- сайт сменился → старая проверка больше не про него
-                    site_check = CASE WHEN places.website = EXCLUDED.website THEN places.site_check END,
-                    site_checked_at = CASE WHEN places.website = EXCLUDED.website THEN places.site_checked_at END,
-                    website = EXCLUDED.website, updated_at = now()
+                    -- сайт, вписанный владельцем, важнее карты; сменился сайт → старая проверка не про него
+                    site_check = CASE WHEN places.website_manual <> '' OR places.website = EXCLUDED.website
+                                      THEN places.site_check END,
+                    site_checked_at = CASE WHEN places.website_manual <> '' OR places.website = EXCLUDED.website
+                                           THEN places.site_checked_at END,
+                    website = CASE WHEN places.website_manual <> '' THEN places.website_manual ELSE EXCLUDED.website END,
+                    updated_at = now()
                 RETURNING id""",
                 (p.source, p.ext_type, p.ext_id, niche_id, city_id, p.name, p.street, p.housenumber, p.lat, p.lon,
                  p.phones, p.website, Jsonb(p.channels), p.updated_at, p.contacts_known)).fetchone()
@@ -258,12 +261,12 @@ async def _work(job_id: int, finishing: _Finishing) -> None:
         fresh = sum(1 for r in best if r["shown_at"] is None)
         if best_ids:
             await db(_mark_shown, best_ids)
-        suitable = (await db(fetch_one, "SELECT count(*) AS n FROM places WHERE id = ANY(%s) AND category = ANY(%s)",
-                             (ids, cats)))["n"]
-        msg = (f"Найдено на карте: {len(ids)}. Подходят под выбранные категории ({_cat_titles(cats)}): {suitable}. "
-               f"Лучших в выдаче: {len(best_ids) - len(manual)}.")
-        if manual:
-            msg += f" Проверить вручную (контакты 2ГИС закрыты, в OSM их нет): {len(manual)}."
+        rows = await db(fetch_all, "SELECT id, category, status, site_check FROM places WHERE id = ANY(%s)", (ids,))
+        msg = f"Найдено на карте: {len(ids)}. В выдаче: {len(best_ids)}"
+        msg += (f" (с оценкой — {len(best_ids) - len(manual)}, проверить вручную — {len(manual)})." if manual else ".")
+        why = explain_left_out(rows, set(best_ids), cats, job["amount"])
+        if why:
+            msg += " " + why
         if not best_ids:
             msg += " Новых подходящих нет: все уже в работе или пропущены. Ничего не изменилось."
         elif fresh == 0:
@@ -283,6 +286,40 @@ async def _work(job_id: int, finishing: _Finishing) -> None:
                                 error=f"Внутренняя ошибка: {e.__class__.__name__}: {e}"[:500])
 
 
+PIPELINE_STATUSES = ("work", "contacted", "no_answer", "agreed", "done", "refused")
+
+
+def explain_left_out(rows: list[dict], best: set[int], cats: list[str], amount: int) -> str:
+    """Почему найденные не попали в выдачу — одной фразой с числами и подсказкой, что включить."""
+    counts: dict[str, int] = {}
+
+    def add(reason: str) -> None:
+        counts[reason] = counts.get(reason, 0) + 1
+
+    for r in rows:
+        if r["id"] in best:
+            continue
+        check = r.get("site_check") or {}
+        if r["status"] in PIPELINE_STATUSES:
+            add("уже в работе")
+        elif r["status"] == "skipped":
+            add("пропущены тобой")
+        elif r["category"] is None:
+            add("сайт защищён от проверки (скорее всего крупный)" if check.get("protected") else "сайт в порядке")
+        elif r["category"] not in cats:
+            add(f"«{scoring.CATEGORIES.get(r['category'], r['category'])}» — не выбрано в «Что ищу»")
+        else:
+            add(f"не вошли в количество ({amount})")
+    if not counts:
+        return ""
+    parts = [f"{n} — {reason}" for reason, n in sorted(counts.items(), key=lambda x: -x[1])]
+    text = "Не попали в выдачу: " + "; ".join(parts) + "."
+    hidden = [c for c in scoring.CATEGORIES if c not in cats and any(f"«{scoring.CATEGORIES[c]}»" in p for p in parts)]
+    if hidden:
+        text += " Чтобы их видеть, включи в «Что ищу»: " + ", ".join(f"«{scoring.CATEGORIES[c]}»" for c in hidden) + "."
+    return text
+
+
 def _cat_titles(cats: list[str]) -> str:
     return ", ".join(scoring.CATEGORIES.get(c, c).lower() for c in cats)
 
@@ -294,8 +331,8 @@ def _now():
 
 def _merge_duplicates(ids: list[int]) -> set[int]:
     """Склеивает записи OSM с записями 2ГИС того же заведения. Возвращает id склеенных записей OSM."""
-    rows = fetch_all("""SELECT id, source, city, name, lat, lon, phones, website, channels, contacts_known
-                        FROM places WHERE id = ANY(%s)""", (ids,))
+    rows = fetch_all("""SELECT id, source, city, name, lat, lon, phones, website, website_manual, channels,
+                               contacts_known FROM places WHERE id = ANY(%s)""", (ids,))
     osm = [r for r in rows if r["source"] == "osm"]
     dgis = {r["id"]: r for r in rows if r["source"] == "2gis"}
     pairs = merge.find_pairs(osm, list(dgis.values()))
@@ -308,7 +345,7 @@ def _merge_duplicates(ids: list[int]) -> set[int]:
             d, o = dgis[dgis_id], by_id[osm_id]
             if not d["contacts_known"]:
                 # 2ГИС не отдал контакты — берём их из OSM; сайт из названия 2ГИС важнее пустого
-                website = o["website"] or d["website"]
+                website = d["website_manual"] or o["website"] or d["website"]
                 c.execute("""UPDATE places SET phones = %s, website = %s, channels = %s, contacts_known = true,
                                  contacts_from = 'osm',
                                  site_check = CASE WHEN website = %s THEN site_check END,

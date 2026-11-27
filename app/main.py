@@ -13,8 +13,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import auth, catalog, config, jobs, store
-from app.db import DbNotConfigured, fetch_all, fetch_one, execute
+import re
+from urllib.parse import quote
+
+from app import auth, catalog, config, jobs, scoring, sitecheck, store
+from app.db import DbNotConfigured, Jsonb, connect, execute, fetch_all, fetch_one
 from app.migrate import migrate
 from app.passwords import clean, hash_password
 from app.scoring import CATEGORIES, is_stale
@@ -350,6 +353,8 @@ def _place_brief(r: dict) -> dict:
     return {"id": r["id"], "name": r["name"], "category": r["category"], "score": r["score"],
             "status": r["status"], "street": r["street"], "housenumber": r["housenumber"],
             "phone": (r["phones"] or [""])[0], "links": [{"label": c["label"], "url": c["url"]} for c in links],
+            "no_site_on_map": not r["website"] and r["category"] in ("site", "card"),
+            "find_site_url": "https://yandex.ru/search/?text=" + quote(f"{r['name']} {_titles([r['city']], catalog.city)} сайт"),
             "stale": is_stale(r),
             "source_updated_at": r["source_updated_at"].date().isoformat() if r["source_updated_at"] else None}
 
@@ -389,6 +394,10 @@ def place_card(place_id: int, request: Request):
     r = fetch_one("SELECT * FROM places WHERE id = %s", (place_id,))
     if not r:
         raise HTTPException(404, "Такой записи нет (возможно, её удалили).")
+    return _card(r)
+
+
+def _card(r: dict) -> dict:
     src = get_source(r["source"])
     c = catalog.city(r["city"])
     niche = next((catalog.niche(n) for n in r["niches"] if catalog.niche(n)), None)
@@ -397,8 +406,48 @@ def place_card(place_id: int, request: Request):
             "website": r["website"], "channels": r["channels"], "site_check": r["site_check"],
             "score_parts": r["score_parts"], "offer": offer,
             "contacts_known": r["contacts_known"], "contacts_from": r["contacts_from"],
+            "website_manual": r["website_manual"],
+            "find_site_url": "https://yandex.ru/search/?text=" + quote(f"{r['name']} {c.title if c else ''} сайт"),
             "object_url": src.object_url(r["ext_type"], r["ext_id"]) if src else "",
             "source_title": src.title if src else r["source"], "attribution": src.attribution if src else ""}
+
+
+class WebsiteBody(BaseModel):
+    url: str
+
+
+@app.post("/api/places/{place_id}/website")
+async def set_website(place_id: int, body: WebsiteBody, request: Request):
+    """«Сайт есть»: владелец вписал адрес. Агент сразу проверяет сайт и пересчитывает категорию."""
+    auth.require(request)
+    await asyncio.to_thread(ensure_db)
+    url = body.url.strip()
+    if url and not url.startswith(("http://", "https://")):
+        url = "http://" + url
+    if url and not re.fullmatch(r"https?://[^\s/$.?#][^\s]*\.[^\s]{2,}", url):
+        raise HTTPException(400, "Это не похоже на адрес сайта. Пример: kolesa34.ru")
+    r = await asyncio.to_thread(fetch_one, "SELECT * FROM places WHERE id = %s", (place_id,))
+    if not r:
+        raise HTTPException(404, "Такой записи нет.")
+    check = await sitecheck.check(url) if url else None
+    row = await asyncio.to_thread(_save_manual_site, place_id, url, check)
+    return {"place": _card(row), "previous_category": r["category"]}
+
+
+def _save_manual_site(place_id: int, url: str, check: dict | None) -> dict:
+    """Сохраняет вписанный сайт (пусто — убрать) и пересчитывает категорию и оценку."""
+    with connect() as c:
+        row = c.execute("""UPDATE places SET website_manual = %s,
+                               website = CASE WHEN %s <> '' THEN %s ELSE website END,
+                               site_check = %s, site_checked_at = CASE WHEN %s THEN now() END
+                           WHERE id = %s RETURNING *""",
+                        (url, url, url, Jsonb(check) if check else None, check is not None, place_id)).fetchone()
+        if not url:  # «сайта нет» — вернуть то, что знает карта
+            row = c.execute("""UPDATE places SET website = '' WHERE id = %s AND website_manual = ''
+                               RETURNING *""", (place_id,)).fetchone()
+        category, total, parts = scoring.score(row)
+        return c.execute("""UPDATE places SET category = %s, score = %s, score_parts = %s WHERE id = %s
+                            RETURNING *""", (category, total, Jsonb(parts), place_id)).fetchone()
 
 
 class StatusBody(BaseModel):

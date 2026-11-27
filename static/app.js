@@ -140,6 +140,11 @@ $(".menu-toggle").addEventListener("click", () => {
   $(".menu-toggle").setAttribute("aria-expanded", String(open));
 });
 $(".flash-x").addEventListener("click", clearFlash);
+// После анимации входа снимаем класс: иначе страница остаётся отдельным слоем,
+// и открытая карточка оказывается под шапкой и сообщением.
+$("#main").addEventListener("animationend", (ev) => {
+  if (ev.target === ev.currentTarget) ev.currentTarget.classList.remove("entering");
+});
 
 function markMenu() {
   for (const a of $$(".menu a")) {
@@ -439,6 +444,7 @@ PAGES.list = () => {
     if (p.category === "manual") contacts.push('<span class="muted">контакты — в карточке 2ГИС</span>');
     else if (p.phone) contacts.push(`<a href="tel:${esc(p.phone.replace(/[^\d+]/g, ""))}">${esc(p.phone)}</a>`);
     for (const l of p.links) contacts.push(`<a href="${esc(l.url)}" target="_blank" rel="noopener nofollow">${esc(l.label)}</a>`);
+    if (p.no_site_on_map) contacts.push(`<a class="find-site" href="${esc(p.find_site_url)}" target="_blank" rel="noopener">Найти сайт?</a>`);
     return `<li class="row${p.status === "skipped" ? " is-skipped" : ""}" tabindex="0" data-id="${p.id}" style="animation-delay:${Math.min(i, 25) * 40}ms">
       <div class="row-name"><b>${esc(p.name)}${badge}${stale}</b>${addr ? `<small>${esc(addr)}</small>` : ""}
         <span class="row-contacts">${contacts.length ? contacts.join("") : '<span class="muted">контактов на карте нет</span>'}</span></div>
@@ -717,6 +723,7 @@ PAGES.list = () => {
       ${manual ? `<p><a class="btn full" href="${esc(p.object_url)}" target="_blank" rel="noopener">Открыть в 2ГИС: телефон и сайт</a></p>` : ""}
       <p class="muted">${esc(p.city_title)}, ${esc(addr)}</p>
       <p><b>${esc(cats[p.category] || "")}</b> · ${manual ? "без оценки" : `оценка <b>${p.score}</b> из 100`} · статус: <b id="pc-status">${esc(st[p.status])}</b></p>
+      ${siteBlock(p)}
       <section class="pc-sec"><h3>Что предложить</h3><p>${esc(p.offer)}</p></section>
       ${manual ? `<section class="pc-sec"><h3>Почему без оценки</h3><p>Оценку считают по сайту и контактам, а их карта не отдала. Посмотри в 2ГИС и реши сам.</p></section>`
         : `<section class="pc-sec"><h3>Из чего сложилась оценка</h3><ul class="parts">${parts}<li class="total"><span>Итого (от 0 до 100)</span><b>${p.score}</b></li></ul></section>`}
@@ -729,6 +736,45 @@ PAGES.list = () => {
         <a href="${esc(p.object_url)}" target="_blank" rel="noopener">Открыть объект в ${esc(p.source_title)}</a><br><small class="muted">${esc(p.attribution)}</small></p></section>
       ${stageButtons(p)}
       <p class="pc-status error" id="pc-error" role="alert" hidden></p>`;
+  }
+
+  // «На карте сайта нет — проверь»: поиск в Яндексе и поле для адреса, если сайт нашёлся
+  function siteBlock(p) {
+    const noSite = !p.website && ["site", "card", "manual"].includes(p.category);
+    const manual = p.website_manual
+      ? `<p class="muted small">Адрес сайта вписан тобой: ${esc(p.website_manual)}.</p>` : "";
+    if (!noSite && !p.website_manual) return "";
+    return `<section class="pc-sec site-box"><h3>Есть ли у них сайт?</h3>
+      ${noSite ? `<p>На карте сайт не указан, но он может быть. Проверь за минуту:</p>
+      <p><a class="btn ghost full" href="${esc(p.find_site_url)}" target="_blank" rel="noopener">Найти сайт в Яндексе</a></p>` : manual}
+      <form class="site-form" data-id="${p.id}">
+        <label for="site-url">${p.website_manual ? "Другой адрес сайта" : "Нашёл сайт — впиши адрес"}</label>
+        <div class="site-row"><input id="site-url" type="text" inputmode="url" autocomplete="off" placeholder="например, kolesa34.ru" value="${esc(p.website_manual)}">
+        <button class="btn small" type="submit">Проверить сайт</button></div>
+        ${p.website_manual ? '<button class="btn ghost small clear-site" type="button">Сайта нет — убрать адрес</button>' : ""}
+        <p class="site-result" role="status" hidden></p>
+      </form></section>`;
+  }
+
+  async function saveSite(form, url) {
+    const id = Number(form.dataset.id);
+    const out = $(".site-result", form), btn = $("button[type=submit]", form);
+    btn.disabled = true; btn.textContent = "Проверяю…"; out.hidden = true;
+    try {
+      const r = await api(`/api/places/${id}/website`, { method: "POST", body: { url } });
+      const p = r.place, cats = cache.catalog.categories;
+      const row = places.find((x) => x.id === id);
+      if (row) Object.assign(row, { category: p.category, score: p.score, no_site_on_map: false });
+      const verdict = !url ? "Адрес убран, категория пересчитана по данным карты."
+        : p.category ? `Сайт проверен: «${cats[p.category]}», оценка ${p.score}.`
+        : "Сайт проверен: в порядке — предлагать нечего, заведение уйдёт из списка.";
+      $("#pc-body").innerHTML = cardHtml(p);
+      flash(verdict, p.category ? "ok" : "warn");
+      drawRows();
+    } catch (e) {
+      out.textContent = "Не сохранилось: " + e.message; out.className = "site-result error"; out.hidden = false;
+      btn.disabled = false; btn.textContent = "Проверить сайт";
+    }
   }
 
   // До «беру в работу» — две кнопки; после — этапы проекта, текущий подсвечен
@@ -793,7 +839,16 @@ PAGES.list = () => {
     const row = ev.target.closest(".row[data-id]");
     if (row && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); openCard(Number(row.dataset.id), row); }
   });
+  layer.addEventListener("submit", (ev) => {
+    const form = ev.target.closest(".site-form"); if (!form) return;
+    ev.preventDefault();
+    const url = $("#site-url", form).value.trim();
+    if (!url) { const o = $(".site-result", form); o.textContent = "Впиши адрес сайта."; o.className = "site-result error"; o.hidden = false; return; }
+    saveSite(form, url);
+  });
   layer.addEventListener("click", (ev) => {
+    const clear = ev.target.closest(".clear-site");
+    if (clear) { saveSite(clear.closest(".site-form"), ""); return; }
     if (ev.target.closest("[data-close]")) closeCard();
     const b = ev.target.closest("button[data-status]"); if (b) setStatus(b.dataset.status);
   });
