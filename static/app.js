@@ -250,8 +250,18 @@ function tilesPage() {
       : data.catalog.amounts.map((n) => ({ id: n, title: String(n) }));
     saved = multi ? [...data.settings[key]] : [data.settings[key]];
     picked = [...saved];
-    box.innerHTML = items.map((it, i) =>
-      `<button type="button" class="tile" data-id="${esc(it.id)}" aria-pressed="false" style="animation-delay:${Math.min(i, 20) * 40}ms">${esc(it.title)}</button>`).join("");
+    const tile = (it, i) =>
+      `<button type="button" class="tile" data-id="${esc(it.id)}" aria-pressed="false" style="animation-delay:${Math.min(i, 20) * 40}ms">${esc(it.title)}</button>`;
+    if (key === "niches") {
+      // ниш много — по группам, с заголовком у каждой
+      let i = 0;
+      box.innerHTML = data.catalog.niche_groups.map((g) => {
+        const inGroup = items.filter((it) => it.group === g);
+        return inGroup.length ? `<h2 class="tile-group">${esc(g)}</h2>${inGroup.map((it) => tile(it, i++)).join("")}` : "";
+      }).join("");
+    } else {
+      box.innerHTML = items.map(tile).join("");
+    }
     mark();
   })();
 

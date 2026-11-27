@@ -60,3 +60,15 @@ def test_bot_protected_site_is_not_a_lead():
     cat, _, parts = scoring.score({"website": "https://big.ru", "phones": ["1"], "channels": [],
                                    "site_check": {"opened": False, "protected": True, "status_code": 401}})
     assert cat is None and "защищён" in parts[0]["label"]
+
+
+def test_niche_catalog_is_consistent():
+    import re
+    from app import catalog
+    ids = [n.id for n in catalog.NICHES]
+    assert len(ids) == len(set(ids)) == 36
+    for n in catalog.NICHES:
+        assert n.group in catalog.GROUPS and n.search_text and n.osm_filters
+        assert {"site", "card", "upgrade", "manual"} <= set(n.offer)
+        for f in n.osm_filters:  # каждый фильтр — набор условий в квадратных скобках
+            assert re.fullmatch(r'(\["[a-z:_]+"(=|~)"[^"]+"(,i)?\]|\["[a-z:_]+"\])+', f), f

@@ -182,7 +182,8 @@ def logout(response: Response):
 
 def _catalog_payload() -> dict:
     return {
-        "niches": [{"id": n.id, "title": n.title} for n in catalog.NICHES],
+        "niches": [{"id": n.id, "title": n.title, "group": n.group} for n in catalog.NICHES],
+        "niche_groups": catalog.GROUPS,
         "cities": [{"id": c.id, "title": c.title} for c in catalog.CITIES],
         "amounts": catalog.AMOUNTS,
         "sources": [{"id": s.id, "title": s.title, "available": s.available, "note": s.note,
