@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from app.contacts import channel_kinds
 
@@ -15,6 +15,7 @@ MIN_CHANNELS_FOR_SITE = 2     # сайта нет, но каналов связ�
 OLD_FOOTER_YEARS = 3          # год в подвале старше стольких лет → признак старого сайта
 SHORT_PAGE_CHARS = 600        # меньше стольких символов текста на главной → «очень короткая»
 MIN_OLD_SIGNS_FOR_UPGRADE = 1 # столько признаков старого сайта достаточно для «доработки»
+STALE_RECORD_YEARS = 3        # запись на карте не правили и не проверяли столько лет → «проверь, работает ли»
 
 # --- баллы ---
 BASE = {"site": 55, "card": 40, "upgrade": 35}
@@ -24,6 +25,7 @@ HAS_BOOKING = 8               # есть онлайн-запись → бизн�
 HAS_PHONE = 5
 HAS_ADDRESS = 4
 NO_CONTACTS_AT_ALL = -25      # не с кем связаться
+STALE_RECORD = -15            # данные на карте старые: заведение могло закрыться или сменить телефон
 SITE_SIGNS = {
     "down": ("сайт не открывается", 35),
     "no_https": ("нет https", 10),
@@ -65,6 +67,12 @@ def site_signs(check: dict | None) -> list[tuple[str, str, int]]:
     return out
 
 
+def is_stale(place: dict) -> bool:
+    """Запись на карте давно не обновлялась. Нет даты — тоже считаем старой: проверить не по чему."""
+    d = place.get("source_updated_at")
+    return d is None or d < datetime.now(timezone.utc) - timedelta(days=365 * STALE_RECORD_YEARS)
+
+
 def score(place: dict) -> tuple[str | None, int, list[dict]]:
     """Возвращает (категория или None, оценка 0–100, разбивка [{label, points}])."""
     parts: list[dict] = []
@@ -100,6 +108,10 @@ def score(place: dict) -> tuple[str | None, int, list[dict]]:
         parts.append({"label": "нет ни телефона, ни соцсетей", "points": NO_CONTACTS_AT_ALL})
     if place.get("street"):
         parts.append({"label": "указан адрес", "points": HAS_ADDRESS})
+    if is_stale(place):
+        d = place.get("source_updated_at")
+        when = f"с {d.year} года" if d else "давно (дата неизвестна)"
+        parts.append({"label": f"запись на карте не обновлялась {when} — проверь, работает ли", "points": STALE_RECORD})
 
     total = max(0, min(100, sum(p["points"] for p in parts)))
     return category, total, parts

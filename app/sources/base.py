@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from app.catalog import City, Niche
 
@@ -20,6 +21,7 @@ class FoundPlace:
     phones: list[str] = field(default_factory=list)
     website: str = ""
     channels: list[dict] = field(default_factory=list)  # [{kind, label, value, url}]
+    updated_at: datetime | None = None  # когда запись на карте правили или проверяли последний раз
 
 
 @dataclass
@@ -27,6 +29,7 @@ class SearchResult:
     places: list[FoundPlace]
     center: tuple[float, float] | None
     from_cache: bool
+    data_at: datetime | None = None  # на какую дату данные карты у ответившего сервера
 
 
 class SourceError(RuntimeError):

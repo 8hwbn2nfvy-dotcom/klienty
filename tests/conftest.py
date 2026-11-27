@@ -20,7 +20,8 @@ PORT = _free_port()
 BASE = f"http://127.0.0.1:{PORT}"
 os.environ["DATABASE_URL"] = TEST_DB
 # первый сервер нарочно мёртвый: агент должен перейти на запасной
-os.environ["OVERPASS_URL"] = "http://127.0.0.1:9/dead," + BASE + "/overpass"
+# второй — с устаревшими данными: агент должен взять свежие у третьего
+os.environ["OVERPASS_URL"] = "http://127.0.0.1:9/dead," + BASE + "/stale-overpass," + BASE + "/overpass"
 os.environ["NOMINATIM_URL"] = BASE + "/nominatim"
 
 from app.passwords import hash_password  # noqa: E402

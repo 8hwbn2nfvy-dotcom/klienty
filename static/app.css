@@ -53,6 +53,40 @@
   color-scheme: dark;
 }
 
+/* Графит: мягче чёрного, акцент оранжевый */
+:root[data-theme="graphite"] {
+  --bg: #1E1F22; --surface: #2A2B2F; --card: #25262A; --line: #3A3B40;
+  --text: #ECECEC; --muted: #A6A7AC;
+  --red: #FF9A4D; --red-strong: #E07A2C;
+  --btn-bg: #F28C38; --btn-text: #1A1A1A; --btn-edge: #FFC08A; --btn-press: #C9661A;
+  --ghost-bg: #2A2B2F; --field: #2A2B2F; --skel: #2C2D31; --skel-hi: #37383D;
+  --ok: #6FD38E; --ok-soft: #1B2B21; --warn: #F2C14E; --warn-soft: #2E2817; --err: #FF7B7F; --err-soft: #34201F;
+  --scrim: rgba(0, 0, 0, .6); --shadow: 0 12px 40px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+/* Песочный: тёплый светлый, кнопки тёмно-коричневые, акцент терракотовый */
+:root[data-theme="sand"] {
+  --bg: #F4EDE1; --surface: #EADFCC; --card: #FBF7F0; --line: #D9CBB3;
+  --text: #2B2118; --muted: #6B5B49;
+  --red: #A84B24; --red-strong: #8A3B1B;
+  --btn-bg: #3B2A1E; --btn-text: #FFFFFF; --btn-edge: #B4532A; --btn-press: #A84B24;
+  --ghost-bg: #FBF7F0; --field: #FFFDF8; --skel: #E6DCCB; --skel-hi: #F0E8DA;
+  --ok: #2F6B3A; --ok-soft: #E3EEDB; --warn: #7A5300; --warn-soft: #F8EBCB; --err: #A8261C; --err-soft: #F6DED7;
+  --scrim: rgba(43, 33, 24, .45); --shadow: 0 12px 40px rgba(60, 40, 20, .2);
+  color-scheme: light;
+}
+/* Ночной синий: тёмно-синий, акцент бирюзовый */
+:root[data-theme="navy"] {
+  --bg: #0E1626; --surface: #16213A; --card: #121C30; --line: #263552;
+  --text: #E8EEF8; --muted: #9AA8C2;
+  --red: #3DD6C6; --red-strong: #22A094;
+  --btn-bg: #2EC4B6; --btn-text: #06231F; --btn-edge: #8AE8DE; --btn-press: #22A094;
+  --ghost-bg: #16213A; --field: #16213A; --skel: #1A2640; --skel-hi: #23314F;
+  --ok: #5BD07E; --ok-soft: #10261A; --warn: #F2C14E; --warn-soft: #2A2210; --err: #FF7B7F; --err-soft: #2E1620;
+  --scrim: rgba(3, 8, 18, .65); --shadow: 0 12px 40px rgba(0, 0, 0, .55);
+  color-scheme: dark;
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
@@ -329,6 +363,45 @@ span.tile.skel { display: block; cursor: default; animation: shimmer 1.3s linear
 .soon-badge { padding: 2px 10px; border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 13px; font-weight: 700; }
 
 .block { padding: 18px 0; border-bottom: 1px solid var(--line); }
+
+/* ---------- «Что ищу» ---------- */
+.find-what { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.find-label { font-weight: 700; }
+
+/* ---------- контакты в строке списка ---------- */
+.row-contacts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 15px; }
+.row-contacts a { display: inline-flex; align-items: center; min-height: 32px; color: var(--red); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.row-contacts a:hover { text-decoration: underline; }
+.badge.stale { background: var(--warn-soft); color: var(--warn); }
+#cancel-btn { margin-top: -4px; }
+
+/* ---------- история ---------- */
+.history { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 10px; }
+.hist { padding: 14px 16px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--card); animation: rise .28s ease both; }
+.hist.skel { height: 104px; border: 0; animation: shimmer 1.3s linear infinite; }
+.hist p { margin: 4px 0 0; overflow-wrap: anywhere; }
+.hist-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; align-items: center; }
+.hist-status { padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; background: var(--surface); color: var(--muted); }
+.hist-status.ok { background: var(--ok-soft); color: var(--ok); }
+.hist-status.err { background: var(--err-soft); color: var(--err); }
+.hist-status.warn { background: var(--warn-soft); color: var(--warn); }
+.hist-status.run { background: var(--btn-bg); color: var(--btn-text); }
+.hist-result { font-weight: 600; }
+
+/* ---------- оформление ---------- */
+.themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 10px; }
+.theme-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; border: 0; border-radius: 14px; cursor: pointer;
+  background: var(--ghost-bg); color: var(--text); box-shadow: inset 0 0 0 1.5px var(--line); font: 600 16px/1.2 inherit; font-family: inherit;
+}
+.theme-tile.on { box-shadow: inset 0 0 0 3px var(--red); }
+.theme-tile:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
+.swatch { width: 100%; height: 44px; border-radius: 10px; border: 1px solid rgba(128, 128, 128, .35); }
+.sw-light { background: linear-gradient(135deg, #FFFFFF 60%, #111111 60% 82%, #D0101A 82%); }
+.sw-dark { background: linear-gradient(135deg, #0B0B0B 60%, #D9141C 60% 82%, #F2F2F2 82%); }
+.sw-graphite { background: linear-gradient(135deg, #1E1F22 60%, #F28C38 60% 82%, #ECECEC 82%); }
+.sw-sand { background: linear-gradient(135deg, #F4EDE1 60%, #3B2A1E 60% 82%, #B4532A 82%); }
+.sw-navy { background: linear-gradient(135deg, #0E1626 60%, #2EC4B6 60% 82%, #E8EEF8 82%); }
 
 /* ---------- уменьшить движение ---------- */
 @media (prefers-reduced-motion: reduce) {

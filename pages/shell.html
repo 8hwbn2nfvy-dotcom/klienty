@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/icon.svg">
-<script>try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{var t=localStorage.getItem("theme");if(/^(light|dark|graphite|sand|navy)$/.test(t))document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="/static/app.css?v={{version}}">
 </head>
 <body data-page="{{page}}">
@@ -17,6 +17,7 @@
   <button class="btn small ghost menu-toggle" type="button" aria-expanded="false" aria-controls="menu">Меню</button>
   <nav id="menu" class="menu" aria-label="Меню">
     <a class="btn" href="/" data-link>Список</a>
+    <a class="btn" href="/history" data-link>История</a>
     <a class="btn" href="/niches" data-link>Ниша</a>
     <a class="btn" href="/cities" data-link>Город</a>
     <a class="btn" href="/amount" data-link>Количество</a>

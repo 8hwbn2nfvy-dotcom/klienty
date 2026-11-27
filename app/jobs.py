@@ -18,6 +18,8 @@ log = logging.getLogger("klienty.jobs")
 SITE_RECHECK_HOURS = 24
 PARALLEL_SITES = 6        # разные домены проверяются параллельно; один домен — 1 запрос/с
 MAX_RADAR_POINTS = 200
+CANCEL_POLL_SECONDS = 1.5
+CANCELLED_MESSAGE = "Поиск отменён. В список ничего не добавлено."
 RESTART_ERROR = "Сервер перезапустился, пока шёл поиск (на бесплатном Render так бывает). Нажми «Повторить»."
 _tasks: set[asyncio.Task] = set()  # только чтобы задача не была собрана сборщиком мусора
 
@@ -31,8 +33,12 @@ class JobBusy(RuntimeError):
 def mark_interrupted() -> int:
     """Вызывается при старте сервера: всё, что «шло», на самом деле оборвалось."""
     with connect() as c:
-        return c.execute("""UPDATE jobs SET status = 'error', error = %s, updated_at = now(), finished_at = now()
-                            WHERE status IN ('queued', 'running')""", (RESTART_ERROR,)).rowcount
+        # если перед перезапуском успели нажать «Отменить», это отмена, а не ошибка
+        return c.execute("""UPDATE jobs SET updated_at = now(), finished_at = now(),
+                                status = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'error' END,
+                                error = CASE WHEN cancel_requested THEN '' ELSE %s END,
+                                message = CASE WHEN cancel_requested THEN %s ELSE message END
+                            WHERE status IN ('queued', 'running')""", (RESTART_ERROR, CANCELLED_MESSAGE)).rowcount
 
 
 def get(job_id: int) -> dict | None:
@@ -43,14 +49,28 @@ def latest() -> dict | None:
     return fetch_one("SELECT * FROM jobs ORDER BY id DESC LIMIT 1")
 
 
-def create(niche_ids: list[str], city_ids: list[str], amount: int, sources: list[str]) -> int:
+def create(niche_ids: list[str], city_ids: list[str], amount: int, sources: list[str],
+           categories: list[str]) -> int:
     """Записывает задачу в базу (синхронно). Запуск — launch(), из цикла событий сервера."""
     running = fetch_one("SELECT id FROM jobs WHERE status IN ('queued', 'running') ORDER BY id DESC LIMIT 1")
     if running:
         raise JobBusy(running["id"])
-    row = fetch_one("""INSERT INTO jobs(niches, cities, amount, sources) VALUES (%s, %s, %s, %s) RETURNING id""",
-                    (niche_ids, city_ids, amount, sources))
+    row = fetch_one("""INSERT INTO jobs(niches, cities, amount, sources, categories)
+                       VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                    (niche_ids, city_ids, amount, sources, categories))
     return row["id"]
+
+
+def request_cancel(job_id: int) -> bool:
+    """Просит идущий поиск остановиться. False — поиск уже закончился, отменять нечего."""
+    with connect() as c:
+        n = c.execute("""UPDATE jobs SET cancel_requested = true, updated_at = now()
+                         WHERE id = %s AND status IN ('queued', 'running')""", (job_id,)).rowcount
+    return n == 1
+
+
+def history(limit: int = 100) -> list[dict]:
+    return fetch_all("SELECT * FROM jobs ORDER BY id DESC LIMIT %s", (limit,))
 
 
 def launch(job_id: int) -> None:
@@ -72,20 +92,21 @@ def _upsert_places(found: list[FoundPlace], niche_id: str, city_id: str) -> list
         for p in found:
             row = c.execute("""
                 INSERT INTO places(source, ext_type, ext_id, niches, city, name, street, housenumber, lat, lon,
-                                   phones, website, channels)
-                VALUES (%s, %s, %s, ARRAY[%s], %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                   phones, website, channels, source_updated_at)
+                VALUES (%s, %s, %s, ARRAY[%s], %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (source, ext_type, ext_id) DO UPDATE SET
                     niches = (SELECT array_agg(DISTINCT x) FROM unnest(places.niches || EXCLUDED.niches) x),
                     city = EXCLUDED.city, name = EXCLUDED.name, street = EXCLUDED.street,
                     housenumber = EXCLUDED.housenumber, lat = EXCLUDED.lat, lon = EXCLUDED.lon,
                     phones = EXCLUDED.phones, channels = EXCLUDED.channels,
+                    source_updated_at = COALESCE(EXCLUDED.source_updated_at, places.source_updated_at),
                     -- сайт сменился → старая проверка больше не про него
                     site_check = CASE WHEN places.website = EXCLUDED.website THEN places.site_check END,
                     site_checked_at = CASE WHEN places.website = EXCLUDED.website THEN places.site_checked_at END,
                     website = EXCLUDED.website, updated_at = now()
                 RETURNING id""",
                 (p.source, p.ext_type, p.ext_id, niche_id, city_id, p.name, p.street, p.housenumber, p.lat, p.lon,
-                 p.phones, p.website, Jsonb(p.channels))).fetchone()
+                 p.phones, p.website, Jsonb(p.channels), p.updated_at)).fetchone()
             ids.append(row["id"])
     return ids
 
@@ -97,7 +118,36 @@ def _save_fetch(source: str, niche_id: str, city_id: str, ids: list[int]) -> Non
                   (source, niche_id, city_id, ids))
 
 
+class _Finishing:
+    """После начала записи итогов отмена уже не прерывает задачу: иначе список и статус разойдутся."""
+    flag = False
+
+
 async def run(job_id: int) -> None:
+    """Запускает поиск и следит за кнопкой «Отменить»: флаг cancel_requested проверяется в базе."""
+    finishing = _Finishing()
+    work = asyncio.create_task(_work(job_id, finishing))
+    try:
+        while not work.done():
+            await asyncio.wait({work}, timeout=CANCEL_POLL_SECONDS)
+            if work.done() or finishing.flag:
+                continue
+            row = await asyncio.to_thread(fetch_one, "SELECT cancel_requested FROM jobs WHERE id = %s", (job_id,))
+            if row and row["cancel_requested"]:
+                work.cancel()
+                try:
+                    await work
+                except asyncio.CancelledError:
+                    pass  # ожидаемо: мы сами остановили поиск
+                await asyncio.to_thread(_update, job_id, status="cancelled", stage="done",
+                                        message=CANCELLED_MESSAGE, finished_at=_now())
+                return
+    except Exception:  # следилка не должна ронять поиск; ошибка уйдёт в лог, поиск доработает
+        log.exception("cancel watcher for job %s failed", job_id)
+        await work
+
+
+async def _work(job_id: int, finishing: _Finishing) -> None:
     db = asyncio.to_thread
     try:
         job = await db(get, job_id)
@@ -112,6 +162,7 @@ async def run(job_id: int) -> None:
         points: list[list[float]] = []
         cached: list[str] = []
         center: tuple[float, float] | None = None
+        data_dates: list = []
         for source_id in job["sources"]:
             src = get_source(source_id)
             if not src or not src.available:
@@ -120,6 +171,8 @@ async def run(job_id: int) -> None:
                 for niche in niches:
                     res = await src.search(niche, city)
                     got = await db(_upsert_places, res.places, niche.id, city.id)
+                    if res.data_at:
+                        data_dates.append(res.data_at)
                     if res.from_cache:
                         cached.append(f"{niche.title} · {city.title}")
                     else:
@@ -134,7 +187,8 @@ async def run(job_id: int) -> None:
                     if len(cities) == 1 and res.center:
                         center = res.center
                     await db(_update, job_id, found=len(ids), points=points,
-                             center=list(center) if center else None)
+                             center=list(center) if center else None,
+                             map_data_at=min(data_dates) if data_dates else None)
         if not ids:
             what = ", ".join(n.title for n in niches)
             where = ", ".join(c.title for c in cities)
@@ -167,16 +221,20 @@ async def run(job_id: int) -> None:
         await db(_save_scores, rows)
         await db(_update, job_id, scored=len(rows))
 
-        # 4. N лучших среди новых
-        best = await db(fetch_all, """SELECT id, shown_at FROM places WHERE id = ANY(%s) AND category IS NOT NULL
-                                      AND status = 'new' ORDER BY score DESC, name LIMIT %s""", (ids, job["amount"]))
+        # 4. N лучших среди новых — только в тех категориях, что выбраны для поиска
+        finishing.flag = True
+        cats = list(job["categories"])
+        best = await db(fetch_all, """SELECT id, shown_at FROM places WHERE id = ANY(%s) AND category = ANY(%s)
+                                      AND status = 'new' ORDER BY score DESC, name LIMIT %s""",
+                        (ids, cats, job["amount"]))
         best_ids = [r["id"] for r in best]
         fresh = sum(1 for r in best if r["shown_at"] is None)
         if best_ids:
             await db(_mark_shown, best_ids)
-        suitable = (await db(fetch_one, "SELECT count(*) AS n FROM places WHERE id = ANY(%s) AND category IS NOT NULL",
-                             (ids,)))["n"]
-        msg = f"Найдено на карте: {len(ids)}. Подходят: {suitable}. Лучших в выдаче: {len(best_ids)}."
+        suitable = (await db(fetch_one, "SELECT count(*) AS n FROM places WHERE id = ANY(%s) AND category = ANY(%s)",
+                             (ids, cats)))["n"]
+        msg = (f"Найдено на карте: {len(ids)}. Подходят под выбранные категории ({_cat_titles(cats)}): {suitable}. "
+               f"Лучших в выдаче: {len(best_ids)}.")
         if not best_ids:
             msg += " Новых подходящих нет: все уже в работе или пропущены. Ничего не изменилось."
         elif fresh == 0:
@@ -192,6 +250,10 @@ async def run(job_id: int) -> None:
         log.exception("job %s failed", job_id)
         await asyncio.to_thread(_update, job_id, status="error", finished_at=_now(),
                                 error=f"Внутренняя ошибка: {e.__class__.__name__}: {e}"[:500])
+
+
+def _cat_titles(cats: list[str]) -> str:
+    return ", ".join(scoring.CATEGORIES.get(c, c).lower() for c in cats)
 
 
 def _now():

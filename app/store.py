@@ -8,6 +8,8 @@ from app.db import Jsonb, connect, fetch_all
 from app.scoring import CATEGORIES
 from app.sources import SOURCES
 
+THEMES = ["light", "dark", "graphite", "sand", "navy"]  # белый, чёрный, графит, песочный, ночной синий
+
 DEFAULTS: dict[str, Any] = {
     "theme": "light",
     "niches": [catalog.DEFAULT_NICHE],
@@ -33,7 +35,7 @@ def get_all() -> dict[str, Any]:
 
 
 def validate(key: str, value: Any) -> Any:
-    if key == "theme" and value in ("light", "dark"):
+    if key == "theme" and value in THEMES:
         return value
     if key in ("niches", "cities", "categories"):
         known = {"niches": [n.id for n in catalog.NICHES], "cities": [c.id for c in catalog.CITIES],

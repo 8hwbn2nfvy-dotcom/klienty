@@ -16,15 +16,18 @@ def _env(name: str, default: str = "") -> str:
 
 
 DATABASE_URL = _env("DATABASE_URL")
+OVERPASS_MAX_LAG_DAYS = 7
 PASSWORD_HASH = _env("PASSWORD_HASH")
-# Серверы Overpass по порядку: если первый не отвечает, агент пробует следующий.
+# Серверы Overpass по порядку: если первый не отвечает или его данные старше
+# OVERPASS_MAX_LAG_DAYS, агент пробует следующий. maps.mail.ru первым: с Render
+# overpass-api.de не подключается, а kumi.systems часто отвечает 504.
 # Своё значение — адреса через запятую.
 OVERPASS_URLS = [u.strip() for u in _env(
     "OVERPASS_URL",
-    "https://overpass-api.de/api/interpreter,"
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter,"
     "https://overpass.private.coffee/api/interpreter,"
-    "https://overpass.kumi.systems/api/interpreter,"
-    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://overpass-api.de/api/interpreter,"
+    "https://overpass.kumi.systems/api/interpreter",
 ).split(",") if u.strip()]
 NOMINATIM_URL = _env("NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
 

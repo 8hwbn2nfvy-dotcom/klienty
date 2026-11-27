@@ -5,7 +5,17 @@
     <a class="chip skel" href="/amount" data-link><small>Сколько</small><b>&nbsp;</b></a>
     <a class="chip skel" href="/sources" data-link><small>Карты</small><b>&nbsp;</b></a>
   </div>
+  <div class="find-what">
+    <span class="find-label">Что ищу</span>
+    <div class="seg" id="cat-filter" role="group" aria-label="Что ищу: категории для поиска">
+      <button type="button" data-cat="*">Все</button>
+      <button type="button" data-cat="site" aria-pressed="false">Создание сайта</button>
+      <button type="button" data-cat="card" aria-pressed="false">Создание визитки</button>
+      <button type="button" data-cat="upgrade" aria-pressed="false">Доработка</button>
+    </div>
+  </div>
   <button class="btn big" id="search-btn" type="button" disabled>Найти клиентов</button>
+  <button class="btn ghost full" id="cancel-btn" type="button" hidden>Отменить поиск</button>
 </section>
 
 <section class="job" id="job" hidden>
@@ -33,12 +43,6 @@
 <section class="list-head">
   <h1 id="list-title">Список</h1>
   <div class="filters">
-    <div class="seg" id="cat-filter" role="group" aria-label="Какие категории показывать">
-      <button type="button" data-cat="*">Все</button>
-      <button type="button" data-cat="site" aria-pressed="false">Создание сайта</button>
-      <button type="button" data-cat="card" aria-pressed="false">Создание визитки</button>
-      <button type="button" data-cat="upgrade" aria-pressed="false">Доработка</button>
-    </div>
     <label class="switch"><input type="checkbox" id="show-skipped"><span></span>Показывать пропущенные</label>
   </div>
 </section>

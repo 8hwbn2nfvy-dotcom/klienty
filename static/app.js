@@ -333,11 +333,11 @@ PAGES.settings = () => {
     try {
       const r = await api("/api/settings", { method: "PUT", body: { theme: b.dataset.theme } });
       cache = cache && { ...cache, settings: r.settings };
-      if (r.changed.length) flash(`Фон: ${b.textContent.toLowerCase()}.`);
-      else flash("Этот фон уже выбран — ничего не изменилось.", "warn");
+      if (r.changed.length) flash(`Оформление: ${b.textContent.trim().toLowerCase()}.`);
+      else flash("Это оформление уже выбрано — ничего не изменилось.", "warn");
     } catch (e) {
       applyTheme(prev); mark(prev);
-      flash("Фон не сохранился, вернул прежний: " + e.message, "err");
+      flash("Оформление не сохранилось, вернул прежнее: " + e.message, "err");
     }
   });
   $("#logout").addEventListener("click", async () => {
@@ -347,12 +347,38 @@ PAGES.settings = () => {
   });
 };
 
+/* ===== история поиска ===== */
+PAGES.history = () => {
+  let alive = true;
+  const STATUS = { done: ["Готово", "ok"], error: ["Ошибка", "err"], cancelled: ["Отменён", "warn"],
+                   running: ["Идёт", "run"], queued: ["Идёт", "run"] };
+  (async () => {
+    let r;
+    try { r = await api("/api/jobs"); } catch (e) { $("#history").innerHTML = ""; flash("История не загрузилась: " + e.message, "err"); return; }
+    if (!alive) return;
+    $("#history-empty").hidden = r.jobs.length > 0;
+    $("#history").innerHTML = r.jobs.map((j, i) => {
+      const [label, kind] = STATUS[j.status] || [j.status, ""];
+      const when = new Date(j.created_at).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+      const result = j.status === "done" ? `Найдено на карте: ${j.found}, в выдаче: ${j.result_count}`
+        : j.status === "error" ? j.error : j.status === "cancelled" ? "Отменён, в список ничего не добавлено" : "Поиск ещё идёт";
+      const data = j.map_data_at ? ` · данные карты на ${new Date(j.map_data_at).toLocaleDateString("ru-RU")}` : "";
+      return `<li class="hist" style="animation-delay:${Math.min(i, 20) * 40}ms">
+        <div class="hist-top"><b>№${j.id} · ${esc(when)}</b><span class="hist-status ${kind}">${esc(label)}</span></div>
+        <p>${esc(j.niche_title)} · ${esc(j.city_title)}</p>
+        <p class="muted">Искал: ${esc(j.categories_title.toLowerCase())} · сколько: ${j.amount}${esc(data)}</p>
+        <p class="hist-result">${esc(result)}</p></li>`;
+    }).join("");
+  })();
+  return () => { alive = false; };
+};
+
 /* ===== главная: поиск и список ===== */
 PAGES.list = () => {
   let alive = true;
   let pollTimer = 0;
   let places = [];
-  let cats = ["site", "card", "upgrade"]; // какие категории показывать; берётся из настроек
+  let cats = ["site", "card", "upgrade"]; // что ищем (и показываем); берётся из настроек
   let showSkipped = false;
   let shownDots = 0;
   let currentJobId = null;
@@ -370,9 +396,14 @@ PAGES.list = () => {
   function rowHtml(p, i) {
     const cats = cache.catalog.categories, st = cache.catalog.statuses;
     const badge = p.status === "new" ? "" : `<span class="badge ${p.status}">${esc(st[p.status])}</span>`;
+    const stale = p.stale ? `<span class="badge stale" title="Запись на карте давно не обновлялась">${p.source_updated_at ? "карта " + p.source_updated_at.slice(0, 4) : "старая запись"}</span>` : "";
     const addr = [p.city_title, [p.street, p.housenumber].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
+    const contacts = [];
+    if (p.phone) contacts.push(`<a href="tel:${esc(p.phone.replace(/[^\d+]/g, ""))}">${esc(p.phone)}</a>`);
+    for (const l of p.links) contacts.push(`<a href="${esc(l.url)}" target="_blank" rel="noopener nofollow">${esc(l.label)}</a>`);
     return `<li class="row${p.status === "skipped" ? " is-skipped" : ""}" tabindex="0" data-id="${p.id}" style="animation-delay:${Math.min(i, 25) * 40}ms">
-      <div class="row-name"><b>${esc(p.name)}${badge}</b>${addr ? `<small>${esc(addr)}</small>` : ""}</div>
+      <div class="row-name"><b>${esc(p.name)}${badge}${stale}</b>${addr ? `<small>${esc(addr)}</small>` : ""}
+        <span class="row-contacts">${contacts.length ? contacts.join("") : '<span class="muted">контактов на карте нет</span>'}</span></div>
       <span class="cat">${esc(cats[p.category] || "")}</span>
       <span class="score${p.score >= 60 ? " hi" : ""}" title="Оценка">${p.score}</span></li>`;
   }
@@ -384,7 +415,7 @@ PAGES.list = () => {
     if (!places.length) { empty.textContent = "Пока пусто. Нажми «Найти клиентов»."; empty.hidden = false; }
     else if (!visible.length) {
       const hiddenSkipped = places.filter((p) => p.status === "skipped" && cats.includes(p.category)).length;
-      empty.textContent = hiddenSkipped ? `В выбранных категориях только пропущенные (${hiddenSkipped}). Включи «Показывать пропущенные».` : "В выбранных категориях никого нет.";
+      empty.textContent = hiddenSkipped ? `В выбранных категориях только пропущенные (${hiddenSkipped}). Включи «Показывать пропущенные».` : "В выбранных категориях пока никого нет. Нажми «Найти клиентов».";
       empty.hidden = false;
     } else empty.hidden = true;
   }
@@ -434,7 +465,7 @@ PAGES.list = () => {
       li.classList.toggle("active", running && i === idx);
       li.classList.toggle("done", job.status === "done" || i < idx);
     });
-    let count = job.found, label = "найдено на карте", sub = `${job.niche_title} · ${job.city_title}`;
+    let count = job.found, label = "найдено на карте", sub = `${job.niche_title} · ${job.city_title} · ищу: ${job.categories_title.toLowerCase()}`;
     if (job.stage === "check") { count = job.checked; label = `из ${job.to_check} сайтов проверено`; sub += ` · найдено ${job.found}`; }
     if (job.stage === "score") { count = job.scored; label = `из ${job.found} оценено`; }
     if (job.status === "done") { count = job.result_count; label = "в списке"; }
@@ -444,6 +475,10 @@ PAGES.list = () => {
     radarPoints(job);
     $("#search-btn").disabled = running;
     $("#search-btn").textContent = running ? "Идёт поиск…" : "Найти клиентов";
+    const cancelBtn = $("#cancel-btn");
+    cancelBtn.hidden = !running;
+    cancelBtn.disabled = !!job.cancel_requested;
+    cancelBtn.textContent = job.cancel_requested ? "Останавливаю…" : "Отменить поиск";
 
     const errBox = $("#job-error");
     if (job.status === "error") {
@@ -466,8 +501,12 @@ PAGES.list = () => {
     if (job.status === "queued" || job.status === "running") { pollTimer = setTimeout(() => poll(jobId), 1200); return; }
     currentJobId = null;
     if (job.status === "done") {
-      flash(job.message, job.result_count ? "ok" : "warn", true); // итог поиска не прячется сам
+      const dataNote = job.map_data_at ? ` Данные карты на ${new Date(job.map_data_at).toLocaleDateString("ru-RU")}.` : "";
+      flash(job.message + dataNote, job.result_count ? "ok" : "warn", true); // итог поиска не прячется сам
       await loadPlaces();
+    } else if (job.status === "cancelled") {
+      $("#job").hidden = true;
+      flash(job.message || "Поиск отменён. В список ничего не добавлено.", "warn", true);
     }
   }
 
@@ -488,6 +527,16 @@ PAGES.list = () => {
   }
 
   $("#search-btn").addEventListener("click", startSearch);
+  $("#cancel-btn").addEventListener("click", async () => {
+    const id = currentJobId; if (!id) return;
+    const btn = $("#cancel-btn"); btn.disabled = true; btn.textContent = "Останавливаю…";
+    try { await api(`/api/jobs/${id}/cancel`, { method: "POST" }); }
+    catch (e) {
+      // 409 — поиск успел закончиться сам; опрос покажет итог
+      flash((e.status === 409 ? "" : "Отмена не сработала: ") + e.message, "warn");
+      btn.disabled = false; btn.textContent = "Отменить поиск";
+    }
+  });
   $("#retry-btn").addEventListener("click", async () => {
     const id = $("#job-error").dataset.job;
     shownDots = 0; $("#radar-dots").innerHTML = "";
@@ -516,12 +565,14 @@ PAGES.list = () => {
     if (b.dataset.cat === "*") next = [...ALL_CATS];
     else next = cats.includes(b.dataset.cat) ? cats.filter((x) => x !== b.dataset.cat) : [...cats, b.dataset.cat];
     if (!next.length) { flash("Нужна хотя бы одна категория — эту не выключаю.", "warn"); return; }
-    if (next.length === prev.length && next.every((x) => prev.includes(x))) { flash("Уже показаны все категории — ничего не изменилось.", "warn"); return; }
+    if (next.length === prev.length && next.every((x) => prev.includes(x))) { flash("Уже выбраны все категории — ничего не изменилось.", "warn"); return; }
     cats = ALL_CATS.filter((x) => next.includes(x));
     markCats(); drawRows();
     try {
       const r = await api("/api/settings", { method: "PUT", body: { categories: cats } });
       cache = { ...cache, settings: r.settings };
+      loadPlaces(); // сервер отдаёт заведения только выбранных категорий
+      flash("Следующий поиск будет искать: " + cats.map((c) => cache.catalog.categories[c].toLowerCase()).join(", ") + ".");
     } catch (e) {
       cats = prev; markCats(); drawRows();
       flash("Фильтр не сохранился, вернул прежний: " + e.message, "err");
@@ -562,7 +613,10 @@ PAGES.list = () => {
       <section class="pc-sec"><h3>Из чего сложилась оценка</h3><ul class="parts">${parts}<li class="total"><span>Итого (от 0 до 100)</span><b>${p.score}</b></li></ul></section>
       ${site ? `<section class="pc-sec"><h3>Проверка сайта</h3><p>${site}</p></section>` : ""}
       <section class="pc-sec"><h3>Контакты</h3>${contacts.length ? `<ul class="contacts">${contacts.join("")}</ul>` : "<p class='muted'>На карте контактов нет.</p>"}</section>
-      <section class="pc-sec"><h3>На карте</h3><p><a href="${esc(p.object_url)}" target="_blank" rel="noopener">Открыть объект в ${esc(p.source_title)}</a><br><small class="muted">${esc(p.attribution)}</small></p></section>
+      <section class="pc-sec"><h3>На карте</h3><p>${p.source_updated_at
+        ? `Запись обновлена или проверена: <b>${new Date(p.source_updated_at).toLocaleDateString("ru-RU")}</b>${p.stale ? " — давно, проверь по телефону, работает ли." : "."}`
+        : "Дата обновления записи неизвестна — проверь по телефону, работает ли."}<br>
+        <a href="${esc(p.object_url)}" target="_blank" rel="noopener">Открыть объект в ${esc(p.source_title)}</a><br><small class="muted">${esc(p.attribution)}</small></p></section>
       <div class="pc-actions">
         <button class="btn" type="button" data-status="work">1 — беру в работу</button>
         <button class="btn ghost" type="button" data-status="skipped">2 — пропускаю</button>
@@ -610,6 +664,7 @@ PAGES.list = () => {
   }
 
   $("#rows").addEventListener("click", (ev) => {
+    if (ev.target.closest(".row-contacts a")) return; // звонок или соцсеть, а не карточка
     const row = ev.target.closest(".row[data-id]"); if (row) openCard(Number(row.dataset.id), row);
   });
   $("#rows").addEventListener("keydown", (ev) => {

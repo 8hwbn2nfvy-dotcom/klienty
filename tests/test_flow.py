@@ -25,7 +25,7 @@ def wait_job(c, job_id, timeout=40):
     end = time.time() + timeout
     while time.time() < end:
         job = c.get(f"/api/jobs/{job_id}").json()["job"]
-        if job["status"] in ("done", "error"):
+        if job["status"] in ("done", "error", "cancelled"):
             return job
         time.sleep(0.2)
     raise AssertionError("job did not finish")
@@ -90,6 +90,14 @@ def test_search_flow(client, fake_server):
     # тестовый «хороший» сайт работает по http — единственный признак «нет https»
     good = client.get(f"/api/places/{by_name['Шинный центр Про']['id']}").json()
     assert [p["label"] for p in good["score_parts"]][1:] == ["нет https"]
+    assert good["stale"] is False
+    ashot = client.get(f"/api/places/{by_name['Шины у Ашота']['id']}").json()
+    assert ashot["stale"] is True and "2016" in " ".join(p["label"] for p in ashot["score_parts"])
+    assert by_name["Автошина"]["stale"] is False  # правка старая, но check_date свежая
+    assert "Шины Закрыто" not in by_name
+    kolesо = by_name["Шиномонтаж Колесо"]
+    assert kolesо["phone"].startswith("+7") and {l["label"] for l in kolesо["links"]} == {"VK", "Telegram", "Онлайн-запись"}
+    assert job["map_data_at"] and fake_server.CALLS["stale_mirror"] >= 1
     assert good["score"] < by_name["Автошина"]["score"]
     assert [p["score"] for p in places] == sorted((p["score"] for p in places), reverse=True)
 
@@ -142,7 +150,7 @@ def test_interrupted_jobs_marked_on_restart(client):
 def test_migrations_are_recorded(client):
     from app.db import fetch_all
     names = [r["name"] for r in fetch_all("SELECT name FROM schema_migrations")]
-    assert names == ["001_init.sql", "002_multi_niche_city.sql"]
+    assert names == ["001_init.sql", "002_multi_niche_city.sql", "003_cancel_history_freshness.sql"]
     from app.migrate import migrate
     assert migrate() == []
 
@@ -160,3 +168,42 @@ def test_several_cities_and_niches(client, fake_server):
     assert job["result_count"] == 5
     r = client.get("/api/places").json()
     assert r["city"] == "Волгоград, Волжский" and all("city_title" in p for p in r["places"])
+
+
+def test_categories_limit_the_search(client):
+    """«Что ищу» — условие поиска: в выдачу попадают только выбранные категории."""
+    login(client)
+    client.put("/api/settings", json={"categories": ["site", "card"], "amount": 10})
+    job = wait_job(client, client.post("/api/search").json()["job_id"])
+    assert job["status"] == "done" and job["categories"] == ["site", "card"]
+    assert job["result_count"] == 2
+    places = client.get("/api/places").json()["places"]
+    assert {p["category"] for p in places} == {"site", "card"}
+    # потом добавили «Доработку»: прошлые поиски её не выдавали — в списке её нет, пока не поищешь
+    client.put("/api/settings", json={"categories": ["site", "card", "upgrade"]})
+    assert len(client.get("/api/places").json()["places"]) == 2
+    job = wait_job(client, client.post("/api/search").json()["job_id"])
+    assert job["result_count"] == 5
+
+
+def test_cancel_and_history(client):
+    login(client)
+    client.put("/api/settings", json={"niches": ["car_wash"]})  # поддельная карта отвечает на мойки 8 секунд
+    job_id = client.post("/api/search").json()["job_id"]
+    time.sleep(1.5)
+    assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 200
+    job = wait_job(client, job_id, timeout=15)
+    assert job["status"] == "cancelled" and "ничего не добавлено" in job["message"]
+    assert client.get("/api/places").json()["places"] == []
+    r = client.post(f"/api/jobs/{job_id}/cancel")
+    assert r.status_code == 409 and "ничего не изменилось" in r.json()["detail"]
+    hist = client.get("/api/jobs").json()["jobs"]
+    assert hist[0]["id"] == job_id and hist[0]["status"] == "cancelled"
+    assert client.get("/history").status_code == 200
+
+
+def test_themes(client):
+    login(client)
+    for t in ("graphite", "sand", "navy", "light"):
+        assert client.put("/api/settings", json={"theme": t}).status_code == 200
+    assert client.put("/api/settings", json={"theme": "pink"}).status_code == 400
