@@ -42,6 +42,8 @@ class Source:
     available = False   # можно ли включить
     default_on = False
     note = ""           # подпись в окне «Карты»
+    unavailable_reason = "подключим позже"
+    checkable = False   # есть ли кнопка «Проверить ключ»
     attribution = ""
 
     async def search(self, niche: Niche, city: City) -> SearchResult:
@@ -49,3 +51,7 @@ class Source:
 
     def object_url(self, ext_type: str, ext_id: int) -> str:
         return ""
+
+    async def check(self) -> dict:
+        """Пробный запрос для кнопки «Проверить ключ»: {ok, message}."""
+        return {"ok": False, "message": "Для этой карты проверки нет."}

@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Any
 
-from app import catalog, scoring, sitecheck
+from app import catalog, merge, scoring, sitecheck
 from app.db import Jsonb, connect, fetch_all, fetch_one
 from app.sources import get as get_source
 from app.sources.base import FoundPlace, SourceError
@@ -196,6 +196,11 @@ async def _work(job_id: int, finishing: _Finishing) -> None:
                      message=f"На карте не нашлось ни одного заведения ({what}; {where}). Ничего не изменилось.")
             return
 
+        # Одно заведение из двух карт — одна запись (контакты берутся из 2ГИС)
+        if len(job["sources"]) > 1:
+            merged = await db(_merge_duplicates, ids)
+            ids = [i for i in ids if i not in merged]
+
         # 2. Проверяю сайты
         await db(_update, job_id, stage="check")
         to_check = await db(fetch_all, """SELECT id, website FROM places WHERE id = ANY(%s) AND website <> ''
@@ -259,6 +264,20 @@ def _cat_titles(cats: list[str]) -> str:
 def _now():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc)
+
+
+def _merge_duplicates(ids: list[int]) -> set[int]:
+    """Склеивает записи OSM с записями 2ГИС того же заведения. Возвращает id склеенных записей OSM."""
+    rows = fetch_all("SELECT id, source, city, name, lat, lon, phones FROM places WHERE id = ANY(%s)", (ids,))
+    osm = [r for r in rows if r["source"] == "osm"]
+    dgis = [r for r in rows if r["source"] == "2gis"]
+    pairs = merge.find_pairs(osm, dgis)
+    with connect() as c:
+        # пересчёт с нуля: если в 2ГИС заведение пропало, запись OSM снова видна
+        c.execute("UPDATE places SET merged_into = NULL WHERE id = ANY(%s)", ([r["id"] for r in osm],))
+        for osm_id, dgis_id in pairs.items():
+            c.execute("UPDATE places SET merged_into = %s WHERE id = %s", (dgis_id, osm_id))
+    return set(pairs)
 
 
 def _save_check(place_id: int, res: dict) -> None:

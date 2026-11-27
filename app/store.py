@@ -54,7 +54,7 @@ def validate(key: str, value: Any) -> Any:
         for s in SOURCES:
             want = bool(value.get(s.id))
             if want and not s.available:
-                raise BadSetting(f"«{s.title}» пока нельзя включить: подключим позже.")
+                raise BadSetting(f"«{s.title}» пока нельзя включить: {s.unavailable_reason}.")
             out[s.id] = want
         return out
     raise BadSetting(f"Неверное значение для «{key}»: {value!r}")

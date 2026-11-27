@@ -65,7 +65,7 @@ def test_settings_changed_flag(client):
     assert client.put("/api/settings", json={"amount": 10}).json()["changed"] == []
     assert client.put("/api/settings", json={"amount": 5}).json()["changed"] == ["amount"]
     assert client.put("/api/settings", json={"amount": 7}).status_code == 400
-    r = client.put("/api/settings", json={"sources": {"osm": True, "2gis": True}})
+    r = client.put("/api/settings", json={"sources": {"osm": True, "yandex": True}})
     assert r.status_code == 400 and "позже" in r.json()["detail"]
     client.put("/api/settings", json={"sources": {"osm": False}})
     r = client.post("/api/search")
@@ -150,7 +150,7 @@ def test_interrupted_jobs_marked_on_restart(client):
 def test_migrations_are_recorded(client):
     from app.db import fetch_all
     names = [r["name"] for r in fetch_all("SELECT name FROM schema_migrations")]
-    assert names == ["001_init.sql", "002_multi_niche_city.sql", "003_cancel_history_freshness.sql", "004_refresh_map_cache.sql"]
+    assert names == ["001_init.sql", "002_multi_niche_city.sql", "003_cancel_history_freshness.sql", "004_refresh_map_cache.sql", "005_2gis.sql"]
     from app.migrate import migrate
     assert migrate() == []
 
@@ -207,3 +207,52 @@ def test_themes(client):
     for t in ("graphite", "sand", "navy", "light"):
         assert client.put("/api/settings", json={"theme": t}).status_code == 200
     assert client.put("/api/settings", json={"theme": "pink"}).status_code == 400
+
+
+def test_2gis_with_osm_merges_duplicates(client):
+    login(client)
+    r = client.put("/api/settings", json={"sources": {"osm": True, "2gis": True}})
+    assert r.status_code == 200 and r.json()["settings"]["sources"]["2gis"] is True
+    job = wait_job(client, client.post("/api/search").json()["job_id"])
+    assert job["status"] == "done", job
+    places = client.get("/api/places").json()["places"]
+    names = [p["name"] for p in places]
+    assert "Колесо 34" in names
+    assert "Шины у Ашота" not in names and "Шины у Ашота, шиномонтаж" in names  # склеились, осталась запись 2ГИС
+    kol = next(p for p in places if p["name"] == "Колесо 34")
+    assert kol["category"] == "site" and {l["label"] for l in kol["links"]} == {"VK", "Telegram"}
+    card = client.get(f"/api/places/{kol['id']}").json()
+    assert card["object_url"] == "https://2gis.ru/firm/70000001000000002" and card["attribution"] == "© 2ГИС"
+    assert card["street"] == "Ленина" and card["housenumber"] == "10"
+    from app.sources.dgis import used_last_30_days
+    assert used_last_30_days() >= 2
+
+
+def test_2gis_key_problems(client, monkeypatch):
+    login(client)
+    from app import config
+    monkeypatch.setattr(config, "DGIS_API_KEY", "nocontacts")
+    r = client.post("/api/sources/2gis/check").json()
+    assert r["ok"] is False and "контакты" in r["message"]
+    client.put("/api/settings", json={"sources": {"osm": False, "2gis": True}})
+    job = wait_job(client, client.post("/api/search").json()["job_id"])
+    assert job["status"] == "error" and "не отдаёт контакты" in job["error"]
+    monkeypatch.setattr(config, "DGIS_API_KEY", "bad")
+    r = client.post("/api/sources/2gis/check").json()  # регион уже в кэше — ошибку даёт поиск заведений
+    assert r["ok"] is False and "не принял ключ" in r["message"]
+    from app.db import execute
+    execute("DELETE FROM source_fetches")  # иначе поиск возьмёт кэш и к 2ГИС не пойдёт
+    job = wait_job(client, client.post(f"/api/jobs/{job['id']}/retry").json()["job_id"])
+    assert job["status"] == "error" and "не принял ключ" in job["error"] and "Ключ не активен" in job["error"]
+    monkeypatch.setattr(config, "DGIS_API_KEY", "")
+    r = client.post("/api/sources/2gis/check").json()
+    assert r["ok"] is False and "DGIS_API_KEY" in r["message"]
+    s = client.get("/api/settings").json()
+    assert s["settings"]["sources"]["2gis"] is False  # без ключа включить нельзя
+    assert client.put("/api/settings", json={"sources": {"osm": True, "2gis": True}}).status_code == 400
+
+
+def test_2gis_check_ok(client):
+    login(client)
+    r = client.post("/api/sources/2gis/check").json()
+    assert r["ok"] is True and "контакты отдаются" in r["message"]

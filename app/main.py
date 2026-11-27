@@ -177,7 +177,9 @@ def _catalog_payload() -> dict:
         "niches": [{"id": n.id, "title": n.title} for n in catalog.NICHES],
         "cities": [{"id": c.id, "title": c.title} for c in catalog.CITIES],
         "amounts": catalog.AMOUNTS,
-        "sources": [{"id": s.id, "title": s.title, "available": s.available, "note": s.note} for s in SOURCES],
+        "sources": [{"id": s.id, "title": s.title, "available": s.available, "note": s.note,
+                     "reason": "" if s.available else s.unavailable_reason, "checkable": s.checkable}
+                    for s in SOURCES],
         "categories": CATEGORIES,
         "statuses": STATUSES,
     }
@@ -257,6 +259,17 @@ async def retry_job(job_id: int, request: Request):
                                     old["amount"], list(old["sources"]), list(old["categories"]))
 
 
+@app.post("/api/sources/{source_id}/check")
+async def check_source(source_id: str, request: Request):
+    """Кнопка «Проверить ключ»: один пробный запрос к карте."""
+    auth.require(request)
+    await asyncio.to_thread(ensure_db)
+    src = get_source(source_id)
+    if not src or not src.checkable:
+        raise HTTPException(404, "Для этой карты проверки нет.")
+    return await src.check()
+
+
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel_job(job_id: int, request: Request):
     auth.require(request)
@@ -312,7 +325,7 @@ def list_places(request: Request):
     ensure_db()
     s = store.get_all()
     rows = fetch_all("""SELECT * FROM places WHERE city = ANY(%s) AND niches && %s AND shown_at IS NOT NULL
-                        AND category = ANY(%s) ORDER BY score DESC, name""", (s["cities"], s["niches"], s["categories"]))
+                        AND category = ANY(%s) AND merged_into IS NULL ORDER BY score DESC, name""", (s["cities"], s["niches"], s["categories"]))
     many_cities = len(s["cities"]) > 1
     return {"places": [_place_brief(r) | ({"city_title": _titles([r["city"]], catalog.city)} if many_cities else {})
                        for r in rows],

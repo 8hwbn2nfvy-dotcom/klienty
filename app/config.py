@@ -17,6 +17,11 @@ def _env(name: str, default: str = "") -> str:
 
 DATABASE_URL = _env("DATABASE_URL")
 OVERPASS_MAX_LAG_DAYS = 7
+# 2ГИС: ключ из Менеджера Платформы (platform.2gis.ru). Пусто — 2ГИС нельзя включить.
+DGIS_API_KEY = _env("DGIS_API_KEY")
+DGIS_URL = _env("DGIS_URL", "https://catalog.api.2gis.com")
+DGIS_PAGE_SIZE = 50   # больше 2ГИС не отдаёт за один запрос
+DGIS_MAX_PAGES = 10   # не больше 500 заведений на пару «ниша + город»: бережём лимит запросов
 PASSWORD_HASH = _env("PASSWORD_HASH")
 # Серверы Overpass по порядку: если первый не отвечает или его данные старше
 # OVERPASS_MAX_LAG_DAYS, агент пробует следующий. maps.mail.ru первым: с Render

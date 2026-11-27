@@ -354,7 +354,12 @@ span.tile.skel { display: block; cursor: default; animation: shimmer 1.3s linear
 
 /* ---------- карты ---------- */
 .sources { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 10px; max-width: 560px; }
-.source { display: flex; align-items: center; gap: 14px; min-height: 68px; padding: 12px 16px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--card); animation: rise .28s ease both; }
+.source { display: grid; gap: 10px; min-height: 68px; padding: 12px 16px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--card); animation: rise .28s ease both; }
+.src-main { display: flex; align-items: center; gap: 14px; }
+.src-check { display: grid; gap: 8px; justify-items: start; }
+.src-result { margin: 0; padding: 10px 12px; border-radius: 10px; overflow-wrap: anywhere; }
+.src-result.ok { background: var(--ok-soft); color: var(--ok); }
+.src-result.err { background: var(--err-soft); color: var(--err); }
 .source.skel { border: 0; animation: shimmer 1.3s linear infinite; }
 .source .src-name { flex: 1; min-width: 0; }
 .source .src-name b { display: block; }

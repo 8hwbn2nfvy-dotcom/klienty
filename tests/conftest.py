@@ -23,6 +23,8 @@ os.environ["DATABASE_URL"] = TEST_DB
 # второй — с устаревшими данными: агент должен взять свежие у третьего
 os.environ["OVERPASS_URL"] = "http://127.0.0.1:9/dead," + BASE + "/stale-overpass," + BASE + "/overpass"
 os.environ["NOMINATIM_URL"] = BASE + "/nominatim"
+os.environ["DGIS_URL"] = BASE + "/2gis"
+os.environ["DGIS_API_KEY"] = "testkey"
 
 from app.passwords import hash_password  # noqa: E402
 

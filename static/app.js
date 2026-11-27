@@ -295,12 +295,27 @@ PAGES.sources = () => {
   const draw = (data) => {
     ul.innerHTML = data.catalog.sources.map((s, i) => `
       <li class="source${s.available ? "" : " soon"}" style="animation-delay:${i * 40}ms">
-        <div class="src-name"><b>${esc(s.title)}</b><small>${s.available ? "Работает" : "Подключим позже"}</small></div>
-        ${s.available ? "" : '<span class="soon-badge">Скоро</span>'}
-        <label class="switch" aria-label="${esc(s.title)}"><input type="checkbox" data-id="${esc(s.id)}" ${data.settings.sources[s.id] ? "checked" : ""} ${s.available ? "" : "disabled"}><span></span></label>
+        <div class="src-main">
+          <div class="src-name"><b>${esc(s.title)}</b><small>${esc(s.available ? (s.note || "Работает") : (s.note || "Подключим позже"))}</small></div>
+          ${s.available ? "" : `<span class="soon-badge">${s.checkable ? "Нет ключа" : "Скоро"}</span>`}
+          <label class="switch" aria-label="${esc(s.title)}"><input type="checkbox" data-id="${esc(s.id)}" ${data.settings.sources[s.id] ? "checked" : ""} ${s.available ? "" : "disabled"}><span></span></label>
+        </div>
+        ${s.checkable ? `<div class="src-check"><button class="btn small ghost" type="button" data-check="${esc(s.id)}">Проверить ключ</button><p class="src-result" role="status" hidden></p></div>` : ""}
       </li>`).join("");
   };
-  loadSettings().then(draw).catch((e) => flash(e.message, "err"));
+  loadSettings(true).then(draw).catch((e) => flash(e.message, "err"));
+  ul.addEventListener("click", async (ev) => {
+    const b = ev.target.closest("button[data-check]"); if (!b) return;
+    const out = $(".src-result", b.parentElement);
+    b.disabled = true; b.textContent = "Проверяю…"; out.hidden = true;
+    try {
+      const r = await api(`/api/sources/${b.dataset.check}/check`, { method: "POST" });
+      out.textContent = r.message; out.className = "src-result " + (r.ok ? "ok" : "err");
+    } catch (e) {
+      out.textContent = "Проверка не прошла: " + e.message; out.className = "src-result err";
+    }
+    out.hidden = false; b.disabled = false; b.textContent = "Проверить ключ";
+  });
   ul.addEventListener("change", async (ev) => {
     const input = ev.target.closest("input[data-id]"); if (!input) return;
     const next = { ...cache.settings.sources, [input.dataset.id]: input.checked };

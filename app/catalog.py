@@ -15,6 +15,11 @@ class Niche:
     title: str
     osm_filters: tuple[str, ...]
     offer: dict[str, str]  # что предложить: по категории (site / card / upgrade)
+    dgis_query: str = ""   # текст поиска в 2ГИС; пусто — название ниши маленькими буквами
+
+    @property
+    def search_text(self) -> str:
+        return self.dgis_query or self.title.lower()
 
 
 @dataclass(frozen=True)

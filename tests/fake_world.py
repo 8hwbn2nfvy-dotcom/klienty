@@ -94,3 +94,45 @@ def good_page(page: str):
 @fake.get("/down")
 def down():
     return HTMLResponse("oops", status_code=502)
+
+
+# ---------- поддельный 2ГИС ----------
+DGIS_ITEMS = [
+    # то же заведение, что «Шины у Ашота» в OSM: тот же телефон, рядом — должно склеиться
+    {"id": "70000001000000001_abc", "name": "Шины у Ашота, шиномонтаж", "type": "branch",
+     "address_name": "Тулака, 3", "point": {"lat": 48.6905, "lon": 44.4805},
+     "dates": {"updated_at": RECENT},
+     "contact_groups": [{"contacts": [
+         {"type": "phone", "value": "+79001234567", "text": "+7 900 123-45-67"},
+         {"type": "whatsapp", "value": "79001234567", "url": "https://wa.me/79001234567", "text": "WhatsApp"}]}]},
+    # новое заведение: только VK в поле «сайт» и Telegram → «создание сайта»
+    {"id": "70000001000000002", "name": "Колесо 34", "type": "branch",
+     "address": {"components": [{"type": "street_number", "street": "Ленина", "number": "10"}]},
+     "point": {"lat": 48.73, "lon": 44.50}, "dates": {"updated_at": RECENT},
+     "contact_groups": [{"contacts": [
+         {"type": "phone", "value": "+78442000000"},
+         {"type": "website", "value": "https://vk.com/koleso34v", "text": "vk.com/koleso34v"},
+         {"type": "telegram", "value": "koleso34", "url": "https://t.me/koleso34"}]}]},
+]
+
+
+@fake.get("/2gis/2.0/region/search")
+def dgis_region(q: str, key: str):
+    CALLS["2gis"] = CALLS.get("2gis", 0) + 1
+    if key == "bad":
+        return {"meta": {"code": 403, "error": {"type": "keyIsNotActive", "message": "Ключ не активен"}}}
+    return {"meta": {"code": 200}, "result": {"items": [{"id": "33", "name": q, "type": "region"}], "total": 1}}
+
+
+@fake.get("/2gis/3.0/items")
+def dgis_items(q: str, region_id: int, key: str, page: int = 1, page_size: int = 20, fields: str = ""):
+    CALLS["2gis"] = CALLS.get("2gis", 0) + 1
+    if key == "bad":
+        return {"meta": {"code": 403, "error": {"type": "keyIsNotActive", "message": "Ключ не активен"}}}
+    if page > 1:
+        return {"meta": {"code": 404, "error": {"type": "itemNotFound", "message": "Results not found"}}}
+    items = [dict(i) for i in DGIS_ITEMS]
+    if key == "nocontacts":
+        for i in items:
+            i.pop("contact_groups", None)
+    return {"meta": {"code": 200}, "result": {"items": items[:page_size], "total": len(items)}}
