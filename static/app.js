@@ -408,6 +408,9 @@ PAGES.list = () => {
   // /search/N — итог одного поиска: только его заведения, без панели поиска
   const resultMatch = location.pathname.match(/^\/search\/(\d+)$/);
   const resultJob = resultMatch ? Number(resultMatch[1]) : null;
+  // /work — все взятые в работу, по всем нишам и городам
+  const workMode = location.pathname === "/work";
+  const fixedMode = !!resultJob || workMode; // страницы без панели поиска
   let pollTimer = 0;
   let places = [];
   let cats = ["site", "card", "upgrade", "manual"]; // что ищем (и показываем); берётся из настроек
@@ -429,7 +432,8 @@ PAGES.list = () => {
     const cats = cache.catalog.categories, st = cache.catalog.statuses;
     const badge = p.status === "new" ? "" : `<span class="badge ${p.status}">${esc(st[p.status])}</span>`;
     const stale = p.stale ? `<span class="badge stale" title="Запись на карте давно не обновлялась">${p.source_updated_at ? "карта " + p.source_updated_at.slice(0, 4) : "старая запись"}</span>` : "";
-    const addr = [p.city_title, [p.street, p.housenumber].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
+    const taken = workMode && p.status_at ? "взято " + new Date(p.status_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "";
+    const addr = [taken, workMode ? p.niche_title : "", p.city_title, [p.street, p.housenumber].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
     const contacts = [];
     if (p.category === "manual") contacts.push('<span class="muted">контакты — в карточке 2ГИС</span>');
     else if (p.phone) contacts.push(`<a href="tel:${esc(p.phone.replace(/[^\d+]/g, ""))}">${esc(p.phone)}</a>`);
@@ -443,6 +447,14 @@ PAGES.list = () => {
         : `<span class="score${p.score >= 60 ? " hi" : ""}" title="Оценка">${p.score}</span>`}</li>`;
   }
 
+  function drawWorkHead() {
+    const n = places.filter((p) => p.status === "work").length;
+    $("#result-title").textContent = "В работе";
+    $("#result-meta").textContent = n ? `Всего: ${n}. Сначала недавно взятые. Вернуть в «новое» или пропустить можно в карточке — заведение уйдёт отсюда.` : "";
+    $("#list-title").textContent = "Взятые в работу";
+    $("#show-skipped").closest("label").hidden = true;
+  }
+
   function drawResultHead(job) {
     const when = new Date(job.created_at).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
     const data = job.map_data_at ? ` · данные карты на ${new Date(job.map_data_at).toLocaleDateString("ru-RU")}` : "";
@@ -453,11 +465,13 @@ PAGES.list = () => {
 
   function drawRows() {
     // в итоге поиска показываем всё, что он выдал, независимо от «Что ищу»
-    const visible = places.filter((p) => (resultJob || cats.includes(p.category)) && (showSkipped || p.status !== "skipped"));
+    const visible = workMode ? places.filter((p) => p.status === "work")
+      : places.filter((p) => (resultJob || cats.includes(p.category)) && (showSkipped || p.status !== "skipped"));
     $("#rows").innerHTML = visible.map(rowHtml).join("");
     const empty = $("#empty");
     if (!places.length) {
-      empty.textContent = resultJob ? "Этот поиск ничего не выдал: новых подходящих заведений не нашлось." : "Пока пусто. Нажми «Найти клиентов».";
+      empty.textContent = workMode ? "Пока никого. В карточке заведения нажми «1 — беру в работу», и оно появится здесь."
+        : resultJob ? "Этот поиск ничего не выдал: новых подходящих заведений не нашлось." : "Пока пусто. Нажми «Найти клиентов».";
       empty.hidden = false;
     }
     else if (!visible.length) {
@@ -469,6 +483,14 @@ PAGES.list = () => {
 
   async function loadPlaces() {
     try {
+      if (workMode) {
+        const r = await api("/api/places/work");
+        if (!alive) return;
+        places = r.places;
+        drawWorkHead();
+        drawRows();
+        return;
+      }
       if (resultJob) {
         const r = await api(`/api/jobs/${resultJob}/places`);
         if (!alive) return;
@@ -724,11 +746,12 @@ PAGES.list = () => {
       flash(`«${p ? p.name : "Запись"}»: ${st[status].toLowerCase()}.`);
       closeCard();
       const row = $(`.row[data-id="${id}"]`);
-      if (row && status === "skipped" && !showSkipped && !REDUCED) {
+      if (row && ((status === "skipped" && !showSkipped) || (workMode && status !== "work")) && !REDUCED) {
         row.classList.add("fade-out");
         await sleep(220);
       }
       drawRows();
+      if (workMode) drawWorkHead();
     } catch (e) {
       if (err) { err.textContent = "Статус не сохранился: " + e.message; err.hidden = false; }
       else flash("Статус не сохранился: " + e.message, "err");
@@ -756,7 +779,7 @@ PAGES.list = () => {
   document.addEventListener("keydown", onKey);
 
   /* --- старт страницы --- */
-  if (resultJob) {
+  if (fixedMode) {
     $("#result-head").hidden = false;
     $(".search-bar").hidden = true;
     $("#job").hidden = true;

@@ -109,6 +109,14 @@ for _path, _page in PAGES.items():
     _page_route(_path, _page)
 
 
+@app.get("/work", response_class=HTMLResponse)
+def work_page(request: Request):
+    """«В работе»: та же страница списка, она сама видит адрес и показывает взятые в работу."""
+    if not auth.is_logged_in(request):
+        return RedirectResponse("/login", status_code=303)
+    return render_page("list", title="В работе")
+
+
 @app.get("/search/{job_id}", response_class=HTMLResponse)
 def result_page(job_id: int, request: Request):
     """Итог одного поиска: та же страница списка, она сама видит адрес и показывает только этот поиск."""
@@ -355,6 +363,19 @@ def list_places(request: Request):
     return {"places": [_place_brief(r) | ({"city_title": _titles([r["city"]], catalog.city)} if many_cities else {})
                        for r in rows],
             "niche": _titles(s["niches"], catalog.niche), "city": _titles(s["cities"], catalog.city)}
+
+
+@app.get("/api/places/work")
+def work_places(request: Request):
+    """Все взятые в работу — по всем нишам и городам, сначала недавно взятые."""
+    auth.require(request)
+    ensure_db()
+    rows = fetch_all("""SELECT * FROM places WHERE status = 'work' AND merged_into IS NULL
+                        ORDER BY status_at DESC NULLS LAST, name""")
+    return {"places": [_place_brief(r) | {
+        "city_title": _titles([r["city"]], catalog.city),
+        "niche_title": _titles(r["niches"][:1], catalog.niche),
+        "status_at": r["status_at"].isoformat() if r["status_at"] else None} for r in rows]}
 
 
 @app.get("/api/places/{place_id}")

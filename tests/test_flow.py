@@ -308,3 +308,24 @@ def test_result_page_shows_only_that_search(client, monkeypatch):
     assert client.get("/api/jobs/999999/places").status_code == 404
     client.cookies.clear()
     assert client.get(f"/search/{first['id']}", follow_redirects=False).status_code == 303
+
+
+def test_work_page_collects_taken_places(client):
+    login(client)
+    assert client.get("/api/places/work").json()["places"] == []
+    wait_job(client, client.post("/api/search").json()["job_id"])
+    places = client.get("/api/places").json()["places"]
+    a, b = places[0], places[1]
+    client.post(f"/api/places/{a['id']}/status", json={"status": "work"})
+    client.post(f"/api/places/{b['id']}/status", json={"status": "work"})
+    # другой город в настройках — «В работе» всё равно показывает всё
+    client.put("/api/settings", json={"cities": ["saratov"]})
+    work = client.get("/api/places/work").json()["places"]
+    assert [p["id"] for p in work] == [b["id"], a["id"]]  # сначала недавно взятые
+    assert work[0]["city_title"] == "Волгоград" and work[0]["niche_title"] == "Шиномонтаж" and work[0]["status_at"]
+    client.post(f"/api/places/{a['id']}/status", json={"status": "new"})
+    assert [p["id"] for p in client.get("/api/places/work").json()["places"]] == [b["id"]]
+    assert client.get("/work").status_code == 200
+    client.cookies.clear()
+    assert client.get("/work", follow_redirects=False).status_code == 303
+    assert client.get("/api/places/work").status_code == 401
