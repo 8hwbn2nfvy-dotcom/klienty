@@ -27,7 +27,11 @@ PAGES = {"/": "list", "/history": "history", "/niches": "niches", "/cities": "ci
          "/sources": "sources", "/settings": "settings"}
 TITLES = {"list": "Клиенты", "history": "История", "niches": "Ниша", "cities": "Город", "amount": "Количество",
           "sources": "Карты", "settings": "Настройки", "login": "Вход"}
-STATUSES = {"new": "Новое", "work": "В работе", "skipped": "Пропущено"}
+STATUSES = {"new": "Новое", "work": "Взято в работу", "contacted": "Жду ответа", "no_answer": "Не ответили",
+            "agreed": "Делаю сайт", "done": "Сделано", "refused": "Отказались", "skipped": "Пропущено"}
+# этапы после «беру в работу» — страница «В работе»; порядок = порядок кнопок
+PIPELINE = ["work", "contacted", "no_answer", "agreed", "done", "refused"]
+CLOSED = ["done", "refused"]  # завершённые: на «В работе» скрыты, пока их не выбрать
 
 
 class DbState:
@@ -198,7 +202,7 @@ def _catalog_payload() -> dict:
                      "reason": "" if s.available else s.unavailable_reason, "checkable": s.checkable}
                     for s in SOURCES],
         "categories": CATEGORIES,
-        "statuses": STATUSES,
+        "statuses": STATUSES, "pipeline": PIPELINE, "closed": CLOSED,
     }
 
 
@@ -367,11 +371,11 @@ def list_places(request: Request):
 
 @app.get("/api/places/work")
 def work_places(request: Request):
-    """Все взятые в работу — по всем нишам и городам, сначала недавно взятые."""
+    """Всё, что взято в работу, на любом этапе — по всем нишам и городам, сначала недавно изменённые."""
     auth.require(request)
     ensure_db()
-    rows = fetch_all("""SELECT * FROM places WHERE status = 'work' AND merged_into IS NULL
-                        ORDER BY status_at DESC NULLS LAST, name""")
+    rows = fetch_all("""SELECT * FROM places WHERE status = ANY(%s) AND merged_into IS NULL
+                        ORDER BY status_at DESC NULLS LAST, name""", (PIPELINE,))
     return {"places": [_place_brief(r) | {
         "city_title": _titles([r["city"]], catalog.city),
         "niche_title": _titles(r["niches"][:1], catalog.niche),

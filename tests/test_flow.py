@@ -329,3 +329,23 @@ def test_work_page_collects_taken_places(client):
     client.cookies.clear()
     assert client.get("/work", follow_redirects=False).status_code == 303
     assert client.get("/api/places/work").status_code == 401
+
+
+def test_project_stages(client):
+    login(client)
+    s = client.get("/api/settings").json()["catalog"]
+    assert s["pipeline"] == ["work", "contacted", "no_answer", "agreed", "done", "refused"]
+    wait_job(client, client.post("/api/search").json()["job_id"])
+    pid = client.get("/api/places").json()["places"][0]["id"]
+    for st in ("work", "contacted", "no_answer", "agreed", "done"):
+        r = client.post(f"/api/places/{pid}/status", json={"status": st}).json()
+        assert r["changed"] is True and r["status"] == st
+    assert client.post(f"/api/places/{pid}/status", json={"status": "done"}).json()["changed"] is False
+    assert client.post(f"/api/places/{pid}/status", json={"status": "paid"}).status_code == 400
+    work = client.get("/api/places/work").json()["places"]
+    assert [p["status"] for p in work] == ["done"]  # завершённые тоже отдаются, страница прячет их сама
+    # взятое на любом этапе в новую выдачу поиска не попадает
+    client.post(f"/api/places/{pid}/status", json={"status": "refused"})
+    job = wait_job(client, client.post("/api/search").json()["job_id"])
+    ids = {p["id"] for p in client.get(f"/api/jobs/{job['id']}/places").json()["places"]}
+    assert pid not in ids

@@ -411,6 +411,7 @@ PAGES.list = () => {
   // /work — все взятые в работу, по всем нишам и городам
   const workMode = location.pathname === "/work";
   const fixedMode = !!resultJob || workMode; // страницы без панели поиска
+  let stages = [];  // «В работе»: какие этапы показаны; по умолчанию все незавершённые
   let pollTimer = 0;
   let places = [];
   let cats = ["site", "card", "upgrade", "manual"]; // что ищем (и показываем); берётся из настроек
@@ -432,7 +433,7 @@ PAGES.list = () => {
     const cats = cache.catalog.categories, st = cache.catalog.statuses;
     const badge = p.status === "new" ? "" : `<span class="badge ${p.status}">${esc(st[p.status])}</span>`;
     const stale = p.stale ? `<span class="badge stale" title="Запись на карте давно не обновлялась">${p.source_updated_at ? "карта " + p.source_updated_at.slice(0, 4) : "старая запись"}</span>` : "";
-    const taken = workMode && p.status_at ? "взято " + new Date(p.status_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "";
+    const taken = workMode && p.status_at ? "этап с " + new Date(p.status_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "";
     const addr = [taken, workMode ? p.niche_title : "", p.city_title, [p.street, p.housenumber].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
     const contacts = [];
     if (p.category === "manual") contacts.push('<span class="muted">контакты — в карточке 2ГИС</span>');
@@ -448,11 +449,26 @@ PAGES.list = () => {
   }
 
   function drawWorkHead() {
-    const n = places.filter((p) => p.status === "work").length;
+    const pipe = cache.catalog.pipeline, st = cache.catalog.statuses;
+    const count = (s) => places.filter((p) => p.status === s).length;
+    const active = places.filter((p) => !cache.catalog.closed.includes(p.status)).length;
     $("#result-title").textContent = "В работе";
-    $("#result-meta").textContent = n ? `Всего: ${n}. Сначала недавно взятые. Вернуть в «новое» или пропустить можно в карточке — заведение уйдёт отсюда.` : "";
-    $("#list-title").textContent = "Взятые в работу";
+    $("#result-meta").textContent = `Идёт работа: ${active}. Сначала недавно изменённые. Этап меняется в карточке.`;
+    $("#list-title").textContent = "Заведения";
     $("#show-skipped").closest("label").hidden = true;
+    const bar = $("#stage-filter");
+    bar.hidden = false;
+    bar.innerHTML = `<button type="button" data-stage="*">Все в работе <b>${active}</b></button>` +
+      pipe.map((s) => `<button type="button" data-stage="${s}">${esc(st[s])} <b>${count(s)}</b></button>`).join("");
+    markStages();
+  }
+  function markStages() {
+    const activeAll = cache.catalog.pipeline.filter((s) => !cache.catalog.closed.includes(s));
+    for (const b of $$("#stage-filter button")) {
+      const on = b.dataset.stage === "*" ? stages.length === activeAll.length && activeAll.every((s) => stages.includes(s))
+        : stages.length === 1 && stages[0] === b.dataset.stage;
+      b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
+    }
   }
 
   function drawResultHead(job) {
@@ -465,7 +481,7 @@ PAGES.list = () => {
 
   function drawRows() {
     // в итоге поиска показываем всё, что он выдал, независимо от «Что ищу»
-    const visible = workMode ? places.filter((p) => p.status === "work")
+    const visible = workMode ? places.filter((p) => stages.includes(p.status))
       : places.filter((p) => (resultJob || cats.includes(p.category)) && (showSkipped || p.status !== "skipped"));
     $("#rows").innerHTML = visible.map(rowHtml).join("");
     const empty = $("#empty");
@@ -711,12 +727,23 @@ PAGES.list = () => {
         ? `Запись обновлена или проверена: <b>${new Date(p.source_updated_at).toLocaleDateString("ru-RU")}</b>${p.stale ? " — давно, проверь по телефону, работает ли." : "."}`
         : "Дата обновления записи неизвестна — проверь по телефону, работает ли."}<br>
         <a href="${esc(p.object_url)}" target="_blank" rel="noopener">Открыть объект в ${esc(p.source_title)}</a><br><small class="muted">${esc(p.attribution)}</small></p></section>
-      <div class="pc-actions">
+      ${stageButtons(p)}
+      <p class="pc-status error" id="pc-error" role="alert" hidden></p>`;
+  }
+
+  // До «беру в работу» — две кнопки; после — этапы проекта, текущий подсвечен
+  function stageButtons(p) {
+    const st = cache.catalog.statuses, pipe = cache.catalog.pipeline;
+    if (!pipe.includes(p.status)) {
+      return `<div class="pc-actions">
         <button class="btn" type="button" data-status="work">1 — беру в работу</button>
         <button class="btn ghost" type="button" data-status="skipped">2 — пропускаю</button>
         <button class="btn ghost reset" type="button" data-status="new" ${p.status === "new" ? "hidden" : ""}>Вернуть в «новое»</button>
-      </div>
-      <p class="pc-status error" id="pc-error" role="alert" hidden></p>`;
+      </div>`;
+    }
+    return `<section class="pc-sec"><h3>Этап проекта</h3>
+      <div class="stage-actions">${pipe.map((s) => `<button type="button" class="stage-btn${s === p.status ? " on" : ""}" data-status="${s}" aria-pressed="${s === p.status}">${esc(st[s])}</button>`).join("")}</div>
+      <button class="btn ghost full reset" type="button" data-status="new">Вернуть в «новое» (убрать из работы)</button></section>`;
   }
 
   async function openCard(id, rowEl) {
@@ -742,11 +769,11 @@ PAGES.list = () => {
       const r = await api(`/api/places/${id}/status`, { method: "POST", body: { status } });
       const p = places.find((x) => x.id === id);
       if (!r.changed) { flash(`Статус уже «${st[status]}» — ничего не изменилось.`, "warn"); return; }
-      if (p) p.status = status;
+      if (p) { p.status = status; p.status_at = new Date().toISOString(); }
       flash(`«${p ? p.name : "Запись"}»: ${st[status].toLowerCase()}.`);
       closeCard();
       const row = $(`.row[data-id="${id}"]`);
-      if (row && ((status === "skipped" && !showSkipped) || (workMode && status !== "work")) && !REDUCED) {
+      if (row && ((status === "skipped" && !showSkipped) || (workMode && !stages.includes(status))) && !REDUCED) {
         row.classList.add("fade-out");
         await sleep(220);
       }
@@ -773,8 +800,8 @@ PAGES.list = () => {
   const onKey = (ev) => {
     if (layer.hidden) return;
     if (ev.key === "Escape") closeCard();
-    else if (ev.key === "1") setStatus("work");
-    else if (ev.key === "2") setStatus("skipped");
+    else if (ev.key === "1" && $(".pc-actions")) setStatus("work");
+    else if (ev.key === "2" && $(".pc-actions")) setStatus("skipped");
   };
   document.addEventListener("keydown", onKey);
 
@@ -786,8 +813,14 @@ PAGES.list = () => {
     $("#job-error").hidden = true;
     (async () => {
       try { await loadSettings(true); } catch (e) { flash(e.message, "err"); return; }
+      stages = cache.catalog.pipeline.filter((x) => !cache.catalog.closed.includes(x));
       loadPlaces();
     })();
+    $("#stage-filter").addEventListener("click", (ev) => {
+      const b = ev.target.closest("button[data-stage]"); if (!b) return;
+      stages = b.dataset.stage === "*" ? cache.catalog.pipeline.filter((x) => !cache.catalog.closed.includes(x)) : [b.dataset.stage];
+      markStages(); drawRows();
+    });
     return () => { alive = false; clearTimeout(pollTimer); document.removeEventListener("keydown", onKey); };
   }
   (async () => {
