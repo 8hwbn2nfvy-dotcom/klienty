@@ -1,7 +1,7 @@
 <section class="search-bar">
   <div class="chips" id="chips">
-    <a class="chip skel" href="/niches" data-link><small>Ниша</small><b>&nbsp;</b></a>
-    <a class="chip skel" href="/cities" data-link><small>Город</small><b>&nbsp;</b></a>
+    <a class="chip skel" href="/niches" data-link><small>Ниши</small><b>&nbsp;</b></a>
+    <a class="chip skel" href="/cities" data-link><small>Города</small><b>&nbsp;</b></a>
     <a class="chip skel" href="/amount" data-link><small>Сколько</small><b>&nbsp;</b></a>
     <a class="chip skel" href="/sources" data-link><small>Карты</small><b>&nbsp;</b></a>
   </div>
@@ -33,11 +33,11 @@
 <section class="list-head">
   <h1 id="list-title">Список</h1>
   <div class="filters">
-    <div class="seg" id="cat-filter" role="group" aria-label="Категория">
-      <button type="button" class="on" data-cat="">Все</button>
-      <button type="button" data-cat="site">Создание сайта</button>
-      <button type="button" data-cat="card">Создание визитки</button>
-      <button type="button" data-cat="upgrade">Доработка</button>
+    <div class="seg" id="cat-filter" role="group" aria-label="Какие категории показывать">
+      <button type="button" data-cat="*">Все</button>
+      <button type="button" data-cat="site" aria-pressed="false">Создание сайта</button>
+      <button type="button" data-cat="card" aria-pressed="false">Создание визитки</button>
+      <button type="button" data-cat="upgrade" aria-pressed="false">Доработка</button>
     </div>
     <label class="switch"><input type="checkbox" id="show-skipped"><span></span>Показывать пропущенные</label>
   </div>

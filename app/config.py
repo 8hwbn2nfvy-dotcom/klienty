@@ -17,7 +17,15 @@ def _env(name: str, default: str = "") -> str:
 
 DATABASE_URL = _env("DATABASE_URL")
 PASSWORD_HASH = _env("PASSWORD_HASH")
-OVERPASS_URL = _env("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
+# Серверы Overpass по порядку: если первый не отвечает, агент пробует следующий.
+# Своё значение — адреса через запятую.
+OVERPASS_URLS = [u.strip() for u in _env(
+    "OVERPASS_URL",
+    "https://overpass-api.de/api/interpreter,"
+    "https://overpass.private.coffee/api/interpreter,"
+    "https://overpass.kumi.systems/api/interpreter,"
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+).split(",") if u.strip()]
 NOMINATIM_URL = _env("NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
 
 # Подпись cookie входа. Если отдельный секрет не задан, он выводится из хэша пароля:

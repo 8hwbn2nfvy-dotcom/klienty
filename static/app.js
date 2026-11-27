@@ -80,7 +80,7 @@ function prefetch(url) {
 let pageCleanup = null;
 let navigating = false;
 
-async function navigate(url, { push = true } = {}) {
+async function navigate(url, { push = true, notice = null } = {}) {
   const target = new URL(url, location.href);
   if (navigating) return;
   if (push && target.pathname === location.pathname) { closeMenu(); return; }
@@ -106,8 +106,10 @@ async function navigate(url, { push = true } = {}) {
     if (PAGE_MS) { void main.offsetWidth; main.classList.add("entering"); }
     prefetched.delete(target.pathname); // в следующий раз — свежая копия
     initPage();
+    if (notice) flash(...notice);
   } catch (e) {
     // Мягкий переход не удался — обычная загрузка страницы, чтобы ничего не потерялось.
+    if (notice) { try { sessionStorage.setItem("notice", JSON.stringify(notice)); } catch (x) { /* сообщение просто не покажется */ } }
     location.assign(target.pathname);
   } finally {
     navigating = false;
@@ -218,31 +220,69 @@ PAGES.login = () => {
   });
 };
 
-/* ===== плитки: ниша / город / количество ===== */
+/* ===== плитки: ниши и города (несколько) / количество (одно) ===== */
 function tilesPage() {
   const box = $("#tiles"); const key = box.dataset.key;
+  const multi = box.dataset.multi === "1";
   let alive = true;
+  let items = [];
+  let saved = [];      // что лежит в настройках
+  let picked = [];     // что отмечено сейчас (для ниш и городов — до «Готово»)
+
+  const titleOf = (id) => (items.find((x) => x.id === id) || {}).title || id;
+  function mark() {
+    for (const t of $$(".tile[data-id]", box)) {
+      const id = key === "amount" ? Number(t.dataset.id) : t.dataset.id;
+      const on = picked.includes(id);
+      t.classList.toggle("on", on); t.setAttribute("aria-pressed", String(on));
+    }
+    if (multi) {
+      $("#done").disabled = picked.length === 0;
+      $("#picked").textContent = picked.length ? "Выбрано: " + picked.map(titleOf).join(", ") : "Ничего не выбрано — отметь хотя бы одно.";
+    }
+  }
+
   (async () => {
     let data;
     try { data = await loadSettings(); } catch (e) { flash(e.message, "err"); return; }
     if (!alive) return;
-    const items = key === "niche" ? data.catalog.niches : key === "city" ? data.catalog.cities
+    items = key === "niches" ? data.catalog.niches : key === "cities" ? data.catalog.cities
       : data.catalog.amounts.map((n) => ({ id: n, title: String(n) }));
+    saved = multi ? [...data.settings[key]] : [data.settings[key]];
+    picked = [...saved];
     box.innerHTML = items.map((it, i) =>
-      `<button type="button" class="tile${it.id === data.settings[key] ? " on" : ""}" data-id="${esc(it.id)}" aria-pressed="${it.id === data.settings[key]}" style="animation-delay:${Math.min(i, 20) * 40}ms">${esc(it.title)}</button>`).join("");
+      `<button type="button" class="tile" data-id="${esc(it.id)}" aria-pressed="false" style="animation-delay:${Math.min(i, 20) * 40}ms">${esc(it.title)}</button>`).join("");
+    mark();
   })();
+
+  async function save(value, label) {
+    const r = await api("/api/settings", { method: "PUT", body: { [key]: value } });
+    cache = { ...cache, settings: r.settings };
+    const notice = r.changed.length ? [`Сохранено: ${label}.`] : [`Выбор не поменялся: ${label} — ничего не изменилось.`, "warn"];
+    navigate("/", { notice });
+  }
+
   box.addEventListener("click", async (ev) => {
     const b = ev.target.closest(".tile[data-id]"); if (!b) return;
-    const id = key === "amount" ? Number(b.dataset.id) : b.dataset.id;
-    const label = b.textContent;
-    try {
-      const r = await api("/api/settings", { method: "PUT", body: { [key]: id } });
-      cache = { ...cache, settings: r.settings };
-      for (const t of $$(".tile", box)) { const on = t === b; t.classList.toggle("on", on); t.setAttribute("aria-pressed", String(on)); }
-      if (r.changed.length) flash(`Сохранено: ${label}.`);
-      else flash(`«${label}» уже выбрано — ничего не изменилось.`, "warn");
-    } catch (e) { flash("Не сохранилось: " + e.message, "err"); }
+    if (multi) {
+      const id = b.dataset.id;
+      picked = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
+      mark();
+      return;
+    }
+    const id = Number(b.dataset.id);
+    picked = [id]; mark();
+    try { await save(id, b.textContent); }
+    catch (e) { picked = [...saved]; mark(); flash("Не сохранилось, выбор вернулся назад: " + e.message, "err"); }
   });
+
+  if (multi) {
+    $("#done").addEventListener("click", async () => {
+      const btn = $("#done"); btn.disabled = true;
+      try { await save(picked, picked.map(titleOf).join(", ")); }
+      catch (e) { btn.disabled = false; flash("Не сохранилось: " + e.message, "err"); }
+    });
+  }
   return () => { alive = false; };
 }
 PAGES.niches = tilesPage;
@@ -312,7 +352,7 @@ PAGES.list = () => {
   let alive = true;
   let pollTimer = 0;
   let places = [];
-  let filterCat = "";
+  let cats = ["site", "card", "upgrade"]; // какие категории показывать; берётся из настроек
   let showSkipped = false;
   let shownDots = 0;
   let currentJobId = null;
@@ -322,7 +362,7 @@ PAGES.list = () => {
   function drawChips(d) {
     const s = d.settings, c = d.catalog;
     const src = c.sources.filter((x) => s.sources[x.id]).map((x) => x.title).join(", ") || "ни одной";
-    const vals = [title(c.niches, s.niche), title(c.cities, s.city), String(s.amount), src];
+    const vals = [s.niches.map((x) => title(c.niches, x)).join(", "), s.cities.map((x) => title(c.cities, x)).join(", "), String(s.amount), src];
     $$("#chips .chip").forEach((chip, i) => { chip.classList.remove("skel"); $("b", chip).textContent = vals[i]; });
     $("#search-btn").disabled = false;
   }
@@ -330,7 +370,7 @@ PAGES.list = () => {
   function rowHtml(p, i) {
     const cats = cache.catalog.categories, st = cache.catalog.statuses;
     const badge = p.status === "new" ? "" : `<span class="badge ${p.status}">${esc(st[p.status])}</span>`;
-    const addr = [p.street, p.housenumber].filter(Boolean).join(", ");
+    const addr = [p.city_title, [p.street, p.housenumber].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
     return `<li class="row${p.status === "skipped" ? " is-skipped" : ""}" tabindex="0" data-id="${p.id}" style="animation-delay:${Math.min(i, 25) * 40}ms">
       <div class="row-name"><b>${esc(p.name)}${badge}</b>${addr ? `<small>${esc(addr)}</small>` : ""}</div>
       <span class="cat">${esc(cats[p.category] || "")}</span>
@@ -338,13 +378,13 @@ PAGES.list = () => {
   }
 
   function drawRows() {
-    const visible = places.filter((p) => (!filterCat || p.category === filterCat) && (showSkipped || p.status !== "skipped"));
+    const visible = places.filter((p) => cats.includes(p.category) && (showSkipped || p.status !== "skipped"));
     $("#rows").innerHTML = visible.map(rowHtml).join("");
     const empty = $("#empty");
     if (!places.length) { empty.textContent = "Пока пусто. Нажми «Найти клиентов»."; empty.hidden = false; }
     else if (!visible.length) {
-      const hiddenSkipped = places.filter((p) => p.status === "skipped" && (!filterCat || p.category === filterCat)).length;
-      empty.textContent = hiddenSkipped ? `В этой категории только пропущенные (${hiddenSkipped}). Включи «Показывать пропущенные».` : "В этой категории никого нет.";
+      const hiddenSkipped = places.filter((p) => p.status === "skipped" && cats.includes(p.category)).length;
+      empty.textContent = hiddenSkipped ? `В выбранных категориях только пропущенные (${hiddenSkipped}). Включи «Показывать пропущенные».` : "В выбранных категориях никого нет.";
       empty.hidden = false;
     } else empty.hidden = true;
   }
@@ -365,8 +405,10 @@ PAGES.list = () => {
   /* --- радар --- */
   function radarPoints(job) {
     const dots = $("#radar-dots");
-    if (!job.center || !job.points.length) return;
-    const [lat0, lon0] = job.center;
+    if (!job.points.length) return;
+    const [lat0, lon0] = job.center || [
+      job.points.reduce((a, p) => a + p[0], 0) / job.points.length,
+      job.points.reduce((a, p) => a + p[1], 0) / job.points.length];
     const k = Math.cos(lat0 * Math.PI / 180);
     const xy = job.points.map(([lat, lon]) => [(lon - lon0) * k, lat - lat0]);
     const maxR = Math.max(1e-6, ...xy.map(([x, y]) => Math.hypot(x, y)));
@@ -460,11 +502,30 @@ PAGES.list = () => {
     poll(currentJobId);
   });
 
-  $("#cat-filter").addEventListener("click", (ev) => {
+  const ALL_CATS = ["site", "card", "upgrade"];
+  function markCats() {
+    for (const b of $$("#cat-filter button")) {
+      const on = b.dataset.cat === "*" ? cats.length === ALL_CATS.length : cats.includes(b.dataset.cat);
+      b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
+    }
+  }
+  $("#cat-filter").addEventListener("click", async (ev) => {
     const b = ev.target.closest("button[data-cat]"); if (!b) return;
-    filterCat = b.dataset.cat;
-    $$("#cat-filter button").forEach((x) => x.classList.toggle("on", x === b));
-    drawRows();
+    const prev = cats;
+    let next;
+    if (b.dataset.cat === "*") next = [...ALL_CATS];
+    else next = cats.includes(b.dataset.cat) ? cats.filter((x) => x !== b.dataset.cat) : [...cats, b.dataset.cat];
+    if (!next.length) { flash("Нужна хотя бы одна категория — эту не выключаю.", "warn"); return; }
+    if (next.length === prev.length && next.every((x) => prev.includes(x))) { flash("Уже показаны все категории — ничего не изменилось.", "warn"); return; }
+    cats = ALL_CATS.filter((x) => next.includes(x));
+    markCats(); drawRows();
+    try {
+      const r = await api("/api/settings", { method: "PUT", body: { categories: cats } });
+      cache = { ...cache, settings: r.settings };
+    } catch (e) {
+      cats = prev; markCats(); drawRows();
+      flash("Фильтр не сохранился, вернул прежний: " + e.message, "err");
+    }
   });
   $("#show-skipped").addEventListener("change", (ev) => { showSkipped = ev.target.checked; drawRows(); });
 
@@ -569,7 +630,7 @@ PAGES.list = () => {
 
   /* --- старт страницы --- */
   (async () => {
-    try { drawChips(await loadSettings(true)); }
+    try { const d = await loadSettings(true); drawChips(d); cats = [...d.settings.categories]; markCats(); }
     catch (e) { flash(e.message, "err"); return; }
     loadPlaces();
     try {
@@ -585,3 +646,7 @@ PAGES.list = () => {
 };
 
 initPage();
+try {
+  const n = sessionStorage.getItem("notice");
+  if (n) { sessionStorage.removeItem("notice"); flash(...JSON.parse(n)); }
+} catch (e) { /* хранилище недоступно — сообщение после полной перезагрузки не покажется */ }

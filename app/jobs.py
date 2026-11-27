@@ -43,13 +43,13 @@ def latest() -> dict | None:
     return fetch_one("SELECT * FROM jobs ORDER BY id DESC LIMIT 1")
 
 
-def create(niche_id: str, city_id: str, amount: int, sources: list[str]) -> int:
+def create(niche_ids: list[str], city_ids: list[str], amount: int, sources: list[str]) -> int:
     """Записывает задачу в базу (синхронно). Запуск — launch(), из цикла событий сервера."""
     running = fetch_one("SELECT id FROM jobs WHERE status IN ('queued', 'running') ORDER BY id DESC LIMIT 1")
     if running:
         raise JobBusy(running["id"])
-    row = fetch_one("""INSERT INTO jobs(niche, city, amount, sources) VALUES (%s, %s, %s, %s) RETURNING id""",
-                    (niche_id, city_id, amount, sources))
+    row = fetch_one("""INSERT INTO jobs(niches, cities, amount, sources) VALUES (%s, %s, %s, %s) RETURNING id""",
+                    (niche_ids, city_ids, amount, sources))
     return row["id"]
 
 
@@ -101,33 +101,45 @@ async def run(job_id: int) -> None:
     db = asyncio.to_thread
     try:
         job = await db(get, job_id)
-        niche, city = catalog.niche(job["niche"]), catalog.city(job["city"])
-        if not niche or not city:
+        niches = [catalog.niche(n) for n in job["niches"]]
+        cities = [catalog.city(c) for c in job["cities"]]
+        if not all(niches) or not all(cities) or not niches or not cities:
             raise SourceError("Ниша или город больше не существуют в справочнике. Выбери заново.")
         await db(_update, job_id, status="running", stage="search")
 
-        # 1. Ищу заведения
+        # 1. Ищу заведения: каждая карта × каждая ниша × каждый город
         ids: list[int] = []
         points: list[list[float]] = []
-        cached_sources: list[str] = []
+        cached: list[str] = []
+        center: tuple[float, float] | None = None
         for source_id in job["sources"]:
             src = get_source(source_id)
             if not src or not src.available:
                 raise SourceError(f"Источник «{source_id}» недоступен.")
-            res = await src.search(niche, city)
-            got = await db(_upsert_places, res.places, niche.id, city.id)
-            if res.from_cache:
-                cached_sources.append(src.title)
-            else:
-                await db(_save_fetch, source_id, niche.id, city.id, got)
-            ids += [i for i in got if i not in ids]
-            points += [[p.lat, p.lon] for p in res.places if p.lat is not None][:MAX_RADAR_POINTS - len(points)]
-            await db(_update, job_id, found=len(ids), points=points,
-                     center=list(res.center) if res.center else None)
+            for city in cities:
+                for niche in niches:
+                    res = await src.search(niche, city)
+                    got = await db(_upsert_places, res.places, niche.id, city.id)
+                    if res.from_cache:
+                        cached.append(f"{niche.title} · {city.title}")
+                    else:
+                        await db(_save_fetch, source_id, niche.id, city.id, got)
+                    for place_id, p in zip(got, res.places):  # got идёт в том же порядке, что res.places
+                        if place_id in ids:
+                            continue  # то же заведение под другой нишей — вторую точку не ставим
+                        ids.append(place_id)
+                        if p.lat is not None and len(points) < MAX_RADAR_POINTS:
+                            points.append([p.lat, p.lon])
+                    # Один город — центр радара в центре города; несколько — радар сам берёт середину точек.
+                    if len(cities) == 1 and res.center:
+                        center = res.center
+                    await db(_update, job_id, found=len(ids), points=points,
+                             center=list(center) if center else None)
         if not ids:
+            what = ", ".join(n.title for n in niches)
+            where = ", ".join(c.title for c in cities)
             await db(_update, job_id, status="done", stage="done", finished_at=_now(),
-                     message=f"На карте не нашлось ни одного заведения «{niche.title}» в городе {city.title}. "
-                             "Ничего не изменилось.")
+                     message=f"На карте не нашлось ни одного заведения ({what}; {where}). Ничего не изменилось.")
             return
 
         # 2. Проверяю сайты
@@ -171,8 +183,8 @@ async def run(job_id: int) -> None:
             msg += " Все они уже были в списке раньше — новых не появилось."
         else:
             msg += f" Новых в списке: {fresh}."
-        if cached_sources:
-            msg += f" Карта ({', '.join(cached_sources)}) взята из сохранённого поиска за последние сутки."
+        if cached:
+            msg += f" Из сохранённого поиска за последние сутки (карту заново не спрашивали): {', '.join(cached)}."
         await db(_update, job_id, status="done", stage="done", result_ids=best_ids, message=msg, finished_at=_now())
     except SourceError as e:
         await asyncio.to_thread(_update, job_id, status="error", error=str(e), finished_at=_now())

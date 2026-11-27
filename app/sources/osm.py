@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+import logging
+from urllib.parse import urlsplit
+
 import httpx
 
 from app import config, contacts
@@ -13,6 +16,7 @@ from app.db import Jsonb, connect, fetch_all, fetch_one
 from app.ratelimit import limiter
 from app.sources.base import FoundPlace, SearchResult, Source, SourceError
 
+log = logging.getLogger("klienty.osm")
 REFRESH_HOURS = 24
 _AREA_OFFSET = {"relation": 3_600_000_000, "way": 2_400_000_000}
 
@@ -68,6 +72,33 @@ def normalize(el: dict) -> FoundPlace | None:
                       lat=lat, lon=lon, phones=phones, website=website, channels=channels)
 
 
+async def _overpass(query: str) -> list[dict]:
+    """Пробует серверы Overpass по очереди. Ошибка — только если не ответил ни один."""
+    problems: list[str] = []
+    async with _client() as cl:
+        for url in config.OVERPASS_URLS:
+            host = urlsplit(url).hostname or url
+            await limiter.wait("overpass:" + host)
+            try:
+                r = await cl.post(url, data={"data": query})
+            except httpx.TimeoutException:
+                problems.append(f"{host}: не ответил вовремя")
+                continue
+            except httpx.HTTPError as e:
+                problems.append(f"{host}: {e.__class__.__name__}")
+                continue
+            if r.status_code != 200:
+                problems.append(f"{host}: код {r.status_code}" + (" (просит подождать)" if r.status_code == 429 else ""))
+                continue
+            try:
+                return r.json().get("elements", [])
+            except ValueError:
+                problems.append(f"{host}: непонятный ответ (не JSON)")
+    log.warning("overpass failed on all servers: %s", "; ".join(problems))
+    raise SourceError("Ни один сервер Overpass (поиск по карте OSM) не ответил: " + "; ".join(problems)
+                      + ". Попробуй через пару минут.")
+
+
 class OsmSource(Source):
     id = "osm"
     title = "OpenStreetMap"
@@ -88,20 +119,7 @@ class OsmSource(Source):
             rows = fetch_all("SELECT * FROM places WHERE id = ANY(%s)", (fresh["place_ids"],))
             return SearchResult([_from_row(r) for r in rows], center, from_cache=True)
 
-        await limiter.wait("overpass")
-        try:
-            async with _client() as cl:
-                r = await cl.post(config.OVERPASS_URL, data={"data": build_query(niche, geo["area_id"])})
-        except httpx.HTTPError as e:
-            raise SourceError(f"Overpass (поиск по карте OSM) не отвечает: {e.__class__.__name__}. Попробуй через пару минут.") from e
-        if r.status_code == 429:
-            raise SourceError("Overpass просит подождать (слишком много запросов). Повтори через 1–2 минуты.")
-        if r.status_code != 200:
-            raise SourceError(f"Overpass ответил кодом {r.status_code}. Сервер карты перегружен, повтори позже.")
-        try:
-            elements = r.json().get("elements", [])
-        except ValueError as e:
-            raise SourceError("Overpass вернул непонятный ответ (не JSON). Повтори позже.") from e
+        elements = await _overpass(build_query(niche, geo["area_id"]))
         places = [p for p in (normalize(el) for el in elements) if p]
         return SearchResult(places, center, from_cache=False)
 

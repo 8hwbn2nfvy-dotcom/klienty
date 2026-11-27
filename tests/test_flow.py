@@ -53,7 +53,15 @@ def test_health(client):
 def test_settings_changed_flag(client):
     login(client)
     s = client.get("/api/settings").json()
-    assert s["settings"]["niche"] == "tyres" and s["settings"]["city"] == "volgograd" and s["settings"]["amount"] == 10
+    assert s["settings"]["niches"] == ["tyres"] and s["settings"]["cities"] == ["volgograd"] and s["settings"]["amount"] == 10
+    assert s["settings"]["categories"] == ["site", "card", "upgrade"]
+    assert client.put("/api/settings", json={"cities": []}).status_code == 400
+    assert client.put("/api/settings", json={"cities": ["volgograd", "mars"]}).status_code == 400
+    r = client.put("/api/settings", json={"cities": ["rostov", "volgograd", "rostov"]}).json()
+    assert r["settings"]["cities"] == ["volgograd", "rostov"] and r["changed"] == ["cities"]
+    assert client.put("/api/settings", json={"cities": ["rostov", "volgograd"]}).json()["changed"] == []
+    assert client.put("/api/settings", json={"categories": ["card", "site"]}).json()["settings"]["categories"] == ["site", "card"]
+    assert client.put("/api/settings", json={"categories": []}).status_code == 400
     assert client.put("/api/settings", json={"amount": 10}).json()["changed"] == []
     assert client.put("/api/settings", json={"amount": 5}).json()["changed"] == ["amount"]
     assert client.put("/api/settings", json={"amount": 7}).status_code == 400
@@ -122,7 +130,7 @@ def test_amount_limits_results(client, fake_server):
 def test_interrupted_jobs_marked_on_restart(client):
     login(client)
     from app.db import fetch_one
-    jid = fetch_one("INSERT INTO jobs(niche, city, amount, sources, status) VALUES ('tyres','volgograd',10,'{osm}','running') RETURNING id")["id"]
+    jid = fetch_one("INSERT INTO jobs(niches, cities, amount, sources, status) VALUES ('{tyres}','{volgograd}',10,'{osm}','running') RETURNING id")["id"]
     from app import jobs
     assert jobs.mark_interrupted() == 1
     job = client.get(f"/api/jobs/{jid}").json()["job"]
@@ -134,6 +142,21 @@ def test_interrupted_jobs_marked_on_restart(client):
 def test_migrations_are_recorded(client):
     from app.db import fetch_all
     names = [r["name"] for r in fetch_all("SELECT name FROM schema_migrations")]
-    assert names == ["001_init.sql"]
+    assert names == ["001_init.sql", "002_multi_niche_city.sql"]
     from app.migrate import migrate
     assert migrate() == []
+
+
+def test_several_cities_and_niches(client, fake_server):
+    """Две ниши × два города: каждая пара — свой запрос к карте, N лучших — на всех вместе."""
+    login(client)
+    before = fake_server.CALLS["overpass"]
+    client.put("/api/settings", json={"cities": ["volgograd", "volzhsky"], "niches": ["tyres", "car_repair"], "amount": 5})
+    job = wait_job(client, client.post("/api/search").json()["job_id"])
+    assert job["status"] == "done", job
+    assert fake_server.CALLS["overpass"] - before == 4
+    assert job["city_title"] == "Волгоград, Волжский" and job["niche_title"] == "Шиномонтаж, Автосервис"
+    assert job["center"] is None and len(job["points"]) == 5
+    assert job["result_count"] == 5
+    r = client.get("/api/places").json()
+    assert r["city"] == "Волгоград, Волжский" and all("city_title" in p for p in r["places"])

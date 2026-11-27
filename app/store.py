@@ -5,12 +5,14 @@ from typing import Any
 
 from app import catalog
 from app.db import Jsonb, connect, fetch_all
+from app.scoring import CATEGORIES
 from app.sources import SOURCES
 
 DEFAULTS: dict[str, Any] = {
     "theme": "light",
-    "niche": catalog.DEFAULT_NICHE,
-    "city": catalog.DEFAULT_CITY,
+    "niches": [catalog.DEFAULT_NICHE],
+    "cities": [catalog.DEFAULT_CITY],
+    "categories": list(CATEGORIES),  # фильтр списка на главной
     "amount": catalog.DEFAULT_AMOUNT,
     "sources": {s.id: s.default_on for s in SOURCES},
 }
@@ -33,10 +35,16 @@ def get_all() -> dict[str, Any]:
 def validate(key: str, value: Any) -> Any:
     if key == "theme" and value in ("light", "dark"):
         return value
-    if key == "niche" and catalog.niche(str(value)):
-        return value
-    if key == "city" and catalog.city(str(value)):
-        return value
+    if key in ("niches", "cities", "categories"):
+        known = {"niches": [n.id for n in catalog.NICHES], "cities": [c.id for c in catalog.CITIES],
+                 "categories": list(CATEGORIES)}[key]
+        what = {"niches": "нишу", "cities": "город", "categories": "категорию"}[key]
+        if not isinstance(value, list) or not value:
+            raise BadSetting(f"Выбери хотя бы одну {what}.")
+        bad = [v for v in value if v not in known]
+        if bad:
+            raise BadSetting(f"Неизвестные значения: {', '.join(map(str, bad))}")
+        return [k for k in known if k in value]  # порядок как в справочнике, без повторов
     if key == "amount" and value in catalog.AMOUNTS:
         return value
     if key == "sources" and isinstance(value, dict):

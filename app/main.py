@@ -203,21 +203,26 @@ def put_settings(changes: dict, request: Request):
 
 # ---------- поиск ----------
 
+def _titles(ids: list[str], lookup) -> str:
+    return ", ".join((lookup(i).title if lookup(i) else i) for i in ids if i)
+
+
 def _job_payload(job: dict | None) -> dict | None:
     if not job:
         return None
-    n, c = catalog.niche(job["niche"]), catalog.city(job["city"])
+    niche_ids = job["niches"] or [job["niche"]]
+    city_ids = job["cities"] or [job["city"]]
     return {k: job[k] for k in ("id", "status", "stage", "found", "to_check", "checked", "scored", "points",
                                 "center", "message", "error", "amount", "sources")} | {
-        "niche_title": n.title if n else job["niche"], "city_title": c.title if c else job["city"],
+        "niche_title": _titles(niche_ids, catalog.niche), "city_title": _titles(city_ids, catalog.city),
         "result_count": len(job["result_ids"] or []),
         "created_at": job["created_at"].isoformat(),
         "finished_at": job["finished_at"].isoformat() if job["finished_at"] else None}
 
 
-async def _create_and_launch(niche: str, city: str, amount: int, sources: list[str]):
+async def _create_and_launch(niches: list[str], cities: list[str], amount: int, sources: list[str]):
     try:
-        job_id = await asyncio.to_thread(jobs.create, niche, city, amount, sources)
+        job_id = await asyncio.to_thread(jobs.create, niches, cities, amount, sources)
     except jobs.JobBusy as e:
         return JSONResponse({"detail": "Поиск уже идёт — показываю его.", "job_id": e.job_id}, status_code=409)
     jobs.launch(job_id)
@@ -232,7 +237,7 @@ async def start_search(request: Request):
     enabled = [sid for sid, on in s["sources"].items() if on]
     if not enabled:
         raise HTTPException(400, "Ни одна карта не включена. Открой «Карты» и включи OpenStreetMap.")
-    return await _create_and_launch(s["niche"], s["city"], s["amount"], enabled)
+    return await _create_and_launch(s["niches"], s["cities"], s["amount"], enabled)
 
 
 @app.post("/api/jobs/{job_id}/retry")
@@ -244,7 +249,8 @@ async def retry_job(job_id: int, request: Request):
         raise HTTPException(404, "Такой задачи нет.")
     if old["status"] != "error":
         raise HTTPException(400, "Повторить можно только задачу с ошибкой.")
-    return await _create_and_launch(old["niche"], old["city"], old["amount"], list(old["sources"]))
+    return await _create_and_launch(list(old["niches"]) or [old["niche"]], list(old["cities"]) or [old["city"]],
+                                    old["amount"], list(old["sources"]))
 
 
 @app.get("/api/jobs/latest")
@@ -273,14 +279,17 @@ def _place_brief(r: dict) -> dict:
 
 @app.get("/api/places")
 def list_places(request: Request):
-    """Список для текущих ниши и города: всё, что хоть раз попадало в выдачу поиска."""
+    """Список для выбранных ниш и городов: всё, что хоть раз попадало в выдачу поиска.
+    Фильтр по категориям делает страница (выбор хранится в настройке categories)."""
     auth.require(request)
     ensure_db()
     s = store.get_all()
-    rows = fetch_all("""SELECT * FROM places WHERE city = %s AND %s = ANY(niches) AND shown_at IS NOT NULL
-                        AND category IS NOT NULL ORDER BY score DESC, name""", (s["city"], s["niche"]))
-    return {"places": [_place_brief(r) for r in rows],
-            "niche": catalog.niche(s["niche"]).title, "city": catalog.city(s["city"]).title}
+    rows = fetch_all("""SELECT * FROM places WHERE city = ANY(%s) AND niches && %s AND shown_at IS NOT NULL
+                        AND category IS NOT NULL ORDER BY score DESC, name""", (s["cities"], s["niches"]))
+    many_cities = len(s["cities"]) > 1
+    return {"places": [_place_brief(r) | ({"city_title": _titles([r["city"]], catalog.city)} if many_cities else {})
+                       for r in rows],
+            "niche": _titles(s["niches"], catalog.niche), "city": _titles(s["cities"], catalog.city)}
 
 
 @app.get("/api/places/{place_id}")
