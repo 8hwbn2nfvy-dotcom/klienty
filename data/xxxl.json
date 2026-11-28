@@ -1,0 +1,27 @@
+{
+  "name": "XXXL",
+  "type": "Фитнес-клуб",
+  "city": "Астрахань",
+  "street": "ул. Савушкина, 4Б",
+  "floor": 3,
+  "rating": 3.5,
+  "ratings_count": 93,
+  "show_rating": false,
+  "nearest_stop": {
+    "name": "Центральный стадион",
+    "walk_min": 2
+  },
+  "phone": null,
+  "phone_source": null,
+  "hours": null,
+  "hours_source": null,
+  "whatsapp": null,
+  "photos": null,
+  "own_site": null,
+  "twogis_search_query": "XXXL, улица Савушкина, 4Б",
+  "mockup_dir": "mockups/g12yaus0qd18/",
+  "source": {
+    "type": "2ГИС, скриншоты карточки",
+    "date": "2026-11-28"
+  }
+}

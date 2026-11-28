@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Запись · Sportavit</title>
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="theme-dyn page-zapis">
+<a class="skip" href="#main">К содержимому</a>
+<div class="mock-banner">Макет для Sportavit — не для публикации</div>
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="brand" href="index.html">Sportavit</a>
+    <nav class="nav-main" aria-label="Основное меню"><ul><li><a href="index.html">Главная</a></li><li><a href="zapis.html" aria-current="page">Запись</a></li><li><a href="kontakty.html">Контакты</a></li></ul></nav>
+    <button type="button" class="menu-btn" aria-expanded="false" aria-controls="menu-panel">Меню</button>
+  </div>
+</header>
+<div class="menu-overlay" data-menu-close></div>
+<nav id="menu-panel" class="menu-panel" aria-label="Меню" inert>
+  <button type="button" class="menu-close" data-menu-close aria-label="Закрыть меню">×</button>
+  <ul><li><a href="index.html">Главная</a></li><li><a href="zapis.html" aria-current="page">Запись</a></li><li><a href="kontakty.html">Контакты</a></li></ul>
+</nav>
+<main id="main" tabindex="-1">
+<section class="page-head reveal"><div class="wrap"><h1>Запись</h1>
+<p class="lead">Sportavit · ул. Зелёная, 56, Астрахань, 3 этаж</p></div></section>
+<section class="booking reveal" aria-label="Заявка на запись">
+  <div class="wrap">
+    <div class="card form" id="booking">
+      <p class="form-note">Все поля обязательны.</p>
+      <div class="field">
+        <label for="f-need">Что нужно</label>
+        <textarea id="f-need" rows="3" required aria-describedby="e-need"></textarea>
+        <p class="err" id="e-need" data-for="f-need" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-date">Дата</label>
+        <input id="f-date" type="date" required aria-describedby="e-date">
+        <p class="err" id="e-date" data-for="f-date" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-name">Имя</label>
+        <input id="f-name" type="text" autocomplete="name" required aria-describedby="e-name">
+        <p class="err" id="e-name" data-for="f-name" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-phone">Телефон</label>
+        <input id="f-phone" type="tel" inputmode="tel" autocomplete="tel" required aria-describedby="e-phone">
+        <p class="err" id="e-phone" data-for="f-phone" hidden></p>
+      </div>
+      <p class="err err-summary" id="f-summary" role="alert" hidden></p>
+      <p><button type="button" class="btn btn-big" id="f-send">Отправить</button></p>
+    </div>
+  </div>
+</section>
+<script>
+(function () {
+  var box = document.getElementById('booking');
+  if (!box) return;
+  var date = document.getElementById('f-date');
+  function today() {
+    var t = new Date();
+    var m = String(t.getMonth() + 1).padStart(2, '0');
+    var d = String(t.getDate()).padStart(2, '0');
+    return t.getFullYear() + '-' + m + '-' + d;
+  }
+  date.min = today();
+  function setErr(id, msg) {
+    var el = document.getElementById(id);
+    var input = document.getElementById(el.getAttribute('data-for'));
+    el.textContent = msg;
+    el.hidden = !msg;
+    if (msg) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+    return !msg;
+  }
+  document.getElementById('f-send').addEventListener('click', function () {
+    var need = document.getElementById('f-need').value.trim();
+    var day = date.value;
+    var name = document.getElementById('f-name').value.trim();
+    var digits = document.getElementById('f-phone').value.replace(/\D/g, '');
+    var ok = true;
+    ok = setErr('e-need', need ? '' : 'Напишите, что нужно.') && ok;
+    ok = setErr('e-date', !day ? 'Укажите дату.' : (day < today() ? 'Дата не может быть раньше сегодняшнего дня.' : '')) && ok;
+    ok = setErr('e-name', name ? '' : 'Укажите имя.') && ok;
+    ok = setErr('e-phone', digits.length >= 10 ? '' : 'Телефон: не меньше 10 цифр.') && ok;
+    var summary = document.getElementById('f-summary');
+    if (!ok) {
+      summary.textContent = 'Заявка не отправлена: исправьте отмеченные поля.';
+      summary.hidden = false;
+      var first = box.querySelector('[aria-invalid="true"]');
+      if (first) first.focus();
+      return;
+    }
+    summary.hidden = true;
+    window.location.href = 'prinyato.html';
+  });
+})();
+</script>
+</main>
+<footer class="site-footer">
+  <div class="wrap footer-grid">
+    <div>
+      <p class="footer-name">Sportavit</p>
+      <p>ул. Зелёная, 56, Астрахань, 3 этаж</p>
+      
+    </div>
+    <nav aria-label="Страницы сайта"><ul><li><a href="index.html">Главная</a></li><li><a href="zapis.html" aria-current="page">Запись</a></li><li><a href="kontakty.html">Контакты</a></li></ul></nav>
+  </div>
+</footer>
+</body>
+</html>

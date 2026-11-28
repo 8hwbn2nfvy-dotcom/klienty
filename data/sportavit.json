@@ -1,0 +1,31 @@
+{
+  "name": "Sportavit",
+  "type": "Фитнес-центр",
+  "city": "Астрахань",
+  "street": "ул. Зелёная, 56",
+  "floor": 3,
+  "rating": 4.2,
+  "ratings_count": 59,
+  "show_rating": true,
+  "nearest_stop": {
+    "name": "Школа №4",
+    "walk_min": 3
+  },
+  "phone": "+7 960 862-61-95",
+  "phone_source": {
+    "url": "https://sportavit.clients.site/",
+    "checked": "2026-11-28",
+    "via": "Firecrawl"
+  },
+  "hours": null,
+  "hours_source": null,
+  "whatsapp": null,
+  "photos": null,
+  "own_site": "https://sportavit.clients.site/",
+  "twogis_search_query": "Sportavit, Зелёная улица, 56",
+  "mockup_dir": "mockups/y6kmxu1xmtyv/",
+  "source": {
+    "type": "2ГИС, скриншоты карточки",
+    "date": "2026-11-28"
+  }
+}

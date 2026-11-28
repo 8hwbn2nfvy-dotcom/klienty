@@ -1,0 +1,27 @@
+{
+  "name": "Астфит",
+  "type": "Фитнес-клуб",
+  "city": "Астрахань",
+  "street": "ул. Котовского, 8а",
+  "floor": 2,
+  "rating": 5.0,
+  "ratings_count": 10,
+  "show_rating": true,
+  "nearest_stop": {
+    "name": "Татар-Базар",
+    "walk_min": 2
+  },
+  "phone": null,
+  "phone_source": null,
+  "hours": null,
+  "hours_source": null,
+  "whatsapp": null,
+  "photos": null,
+  "own_site": null,
+  "twogis_search_query": "Астфит, улица Котовского, 8а",
+  "mockup_dir": "mockups/gg1e4emn99wo/",
+  "source": {
+    "type": "2ГИС, скриншоты карточки",
+    "date": "2026-11-28"
+  }
+}

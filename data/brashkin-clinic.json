@@ -1,0 +1,24 @@
+{
+  "name": "Клиника Доктора Брашкина",
+  "type": "Частные стоматологии",
+  "city": "Астрахань",
+  "street": "ул. Боевая, 126 к1",
+  "floor": 1,
+  "rating": 5.0,
+  "ratings_count": 19,
+  "show_rating": true,
+  "nearest_stop": null,
+  "phone": null,
+  "phone_source": null,
+  "hours": null,
+  "hours_source": null,
+  "whatsapp": null,
+  "photos": null,
+  "own_site": null,
+  "twogis_search_query": "Клиника Доктора Брашкина, Боевая улица, 126 к1",
+  "mockup_dir": "mockups/6dw431mfky3u/",
+  "source": {
+    "type": "2ГИС, скриншоты карточки",
+    "date": "2026-11-28"
+  }
+}

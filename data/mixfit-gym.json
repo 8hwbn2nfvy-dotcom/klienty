@@ -1,0 +1,27 @@
+{
+  "name": "Mix Fit Gym",
+  "type": "Фитнес-центр и тренажёрный зал",
+  "city": "Астрахань",
+  "street": "ул. Николая Ветошникова, 23",
+  "floor": 3,
+  "rating": 4.9,
+  "ratings_count": 100,
+  "show_rating": true,
+  "nearest_stop": {
+    "name": "Бутлерова",
+    "walk_min": null
+  },
+  "phone": null,
+  "phone_source": null,
+  "hours": null,
+  "hours_source": null,
+  "whatsapp": null,
+  "photos": null,
+  "own_site": null,
+  "twogis_search_query": "Mix Fit Gym, улица Николая Ветошникова, 23",
+  "mockup_dir": "mockups/n85jwght5ata/",
+  "source": {
+    "type": "2ГИС, скриншоты карточки",
+    "date": "2026-11-28"
+  }
+}
